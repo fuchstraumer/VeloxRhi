@@ -1,18 +1,18 @@
 #include "Context.hpp"
 #include "AsyncTasks.hpp"
-#include <format>
-#include <iostream>
+#include "Scheduler.hpp"
 #include <print>
-#define GLFW_INCLUDE_NONE
-#include "magic_enum/magic_enum.hpp"
-#include <GLFW/glfw3.h>
 #include <algorithm>
 #include <coroutine>
-#include <unordered_map>
+#include "magic_enum/magic_enum.hpp"
 #include <webgpu/webgpu_glfw.h>
 
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
+// sorry for this doing inline but I want to get it done and over with
 #if !defined(__EMSCRIPTEN__) && defined(_WIN32)
-#undef APIENTRY
+#undef APIENTRY // glfw also defines this, need to undef to compile
 #define WIN32_LEAN_AND_MEAN
 #include <dawn/native/DawnNative.h>
 #include <windows.h>
@@ -36,13 +36,12 @@ std::string GetSystemDirectory()
 }
 #endif
 
-
-
 // true = asyncify IS on, false = it is not, we're doing the async ourselves
 constexpr static bool k_Asyncify = false;
 
 namespace
 {
+
 // todo: we should sink these somewhere more portable, and which could actually give us debug info
 // in live clients maybe?
 [[noreturn]] void LogUncapturedError([[maybe_unused]] const wgpu::Device&,
@@ -67,12 +66,13 @@ void LogDeviceLost([[maybe_unused]] const wgpu::Device&,
                  magic_enum::enum_name(reason),
                  std::string_view(message.data, message.length));
 }
+
 } // namespace
 
 namespace velox
 {
 
-Context::Context(const ContextCreateInfo& createInfo)
+Context::Context(const ContextCreateInfo& createInfo) : scheduler{ std::make_unique<Scheduler>() }
 {
     // only these two objects aren't dependent on async work
     instance = ValidOrExit(requestInstance(createInfo));

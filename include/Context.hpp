@@ -103,7 +103,7 @@ private:
     // we store the surface config to make reconfiguring not need the whole create info
     wgpu::SurfaceConfiguration surfaceConfig{};
 
-    std::unique_ptr<Scheduler> impl{ nullptr };
+    std::unique_ptr<Scheduler> scheduler{ nullptr };
 };
 
 } // namespace velox
