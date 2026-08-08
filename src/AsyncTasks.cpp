@@ -96,7 +96,11 @@ void MapReadAwaitable::await_suspend(std::coroutine_handle<> handle)
                         }
                         else
                         {
-                            scheduler->MarkReady(std::move(slot));
+                            RhiError error = scheduler->MarkReady(std::move(slot));
+                            if (error != RhiError::Success) [[unlikely]]
+                            {
+                                result = std::unexpected(error);
+                            }
                         }
                     });
 }
@@ -154,7 +158,11 @@ void MapWriteAwaitable::await_suspend(std::coroutine_handle<> handle)
                         }
                         else
                         {
-                            scheduler->MarkReady(std::move(slot));
+                            RhiError error = scheduler->MarkReady(std::move(slot));
+                            if (error != RhiError::Success) [[unlikely]]
+                            {
+                                result = std::unexpected(error);
+                            }
                         }
                     });
 }
@@ -188,35 +196,35 @@ void RenderPipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
         slot = scheduler->RegisterPending(handle.address());
     }
 
-    auto callback = [handle, &slot, this](wgpu::CreatePipelineAsyncStatus status,
-                                          wgpu::RenderPipeline pipeline,
-                                          wgpu::StringView message)
-    {
-        if (status != wgpu::CreatePipelineAsyncStatus::Success)
+    device.CreateRenderPipelineAsync(
+        &descriptor,
+        wgpu::CallbackMode::AllowSpontaneous,
+        [handle, &slot, this](
+            wgpu::CreatePipelineAsyncStatus status, wgpu::RenderPipeline pipeline, wgpu::StringView message)
         {
-            detail::PrintStatusMessage("CreateRenderPipelineAsync", status, message);
-            result = std::unexpected(RhiError::PipelineCreationFailed);
-        }
-        else [[likely]]
-        {
-            result = pipeline;
-        }
-
-        if (scheduler)
-        {
-            RhiError readyResult = scheduler->MarkReady(slot);
-            if (readyResult != RhiError::Success) [[unlikely]]
+            if (status != wgpu::CreatePipelineAsyncStatus::Success)
             {
-                result = std::unexpected(readyResult);
+                detail::PrintStatusMessage("CreateRenderPipelineAsync", status, message);
+                result = std::unexpected(RhiError::PipelineCreationFailed);
             }
-        }
-        else
-        {
-            handle.resume();
-        }
-    };
+            else [[likely]]
+            {
+                result = pipeline;
+            }
 
-    device.CreateRenderPipelineAsync(descriptor, wgpu::CallbackMode::AllowSpontaneous, callback);
+            if (scheduler)
+            {
+                RhiError error = scheduler->MarkReady(slot);
+                if (error != RhiError::Success) [[unlikely]]
+                {
+                    result = std::unexpected(error);
+                }
+            }
+            else
+            {
+                handle.resume();
+            }
+        });
 }
 
 Result<wgpu::RenderPipeline> RenderPipelineAwaitable::await_resume() noexcept
@@ -232,30 +240,35 @@ void ComputePipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
         slot = scheduler->RegisterPending(handle.address());
     }
 
-    auto callback = [handle, this](wgpu::CreatePipelineAsyncStatus status,
-                                   wgpu::ComputePipeline pipeline,
-                                   wgpu::StringView message)
-    {
-        if (status != wgpu::CreatePipelineAsyncStatus::Success)
+    device.CreateComputePipelineAsync(
+        &descriptor,
+        wgpu::CallbackMode::AllowSpontaneous,
+        [handle, slot, this](
+            wgpu::CreatePipelineAsyncStatus status, wgpu::ComputePipeline pipeline, wgpu::StringView message)
         {
-            detail::PrintStatusMessage("CreateComputePiplineAsync", status, message);
-            result = std::unexpected(RhiError::PipelineCreationFailed);
-        }
-        else [[likely]]
-        {
-            result = pipeline;
-        }
+            if (status != wgpu::CreatePipelineAsyncStatus::Success)
+            {
+                detail::PrintStatusMessage("CreateComputePiplineAsync", status, message);
+                result = std::unexpected(RhiError::PipelineCreationFailed);
+            }
+            else [[likely]]
+            {
+                result = pipeline;
+            }
 
-        if (scheduler)
-        {
-            scheduler->MarkReady(slot);
-        }
-        else
-        {
-            handle.resume();
-        }
-    };
-    device.CreateComputePipelineAsync(descriptor, wgpu::CallbackMode::AllowSpontaneous, callback);
+            if (scheduler)
+            {
+                RhiError error = scheduler->MarkReady(slot);
+                if (error != RhiError::Success) [[unlikely]]
+                {
+                    result = std::unexpected(error);
+                }
+            }
+            else
+            {
+                handle.resume();
+            }
+        });
 }
 
 Result<wgpu::ComputePipeline> ComputePipelineAwaitable::await_resume() noexcept
