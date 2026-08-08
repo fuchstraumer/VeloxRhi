@@ -4,12 +4,12 @@
 // SlotMap<T, N>
 //
 // A fixed-capacity, contiguous, allocation-free container backed by an intrusive free list. Sometimes called
-// a "slot map" or "generational index array" -- insertion returns a SlotMapHandle (index + generation) that
+// a "slot map" or "generational index array" -- insertion returns a SlotHandle (index + generation) that
 // stays valid until that specific slot is erased, even as other slots are inserted and removed around it.
 // Effectively the same storage family as most containers used in ECS frameworks, but without the dense-sparse
 // split and less focus on iteration performance (there may be gaps in the storage, for example).
 //
-// Handles are generation-checked: erasing a slot bumps its generation, so a stale SlotMapHandle obtained
+// Handles are generation-checked: erasing a slot bumps its generation, so a stale SlotHandle obtained
 // before an Erase() will never alias a slot that has since been reused for something else. Occupancy is
 // folded into the same counter (odd generation == occupied, even == free) rather than kept in a parallel bool
 // array, so per-slot bookkeeping costs exactly one uint32_t.
@@ -17,6 +17,7 @@
 // Iteration order follows physical slot order, not insertion order, and visits only occupied slots. This is a
 // forward_iterator; do not insert or erase into the SlotMap while an iteration over it is in progress.
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -27,10 +28,8 @@
 // enforcing this contract to make sure only simple POD types are used in the slotmap.
 // it would be fine if not, but this is the contract I want to enforce on myself just in case
 template<typename T>
-concept SlotmapElementType =
-    std::is_trivially_destructible_v<T> && std::is_move_constructible_v<T> &&
-    std::is_nothrow_move_constructible_v<T> && std::is_move_assignable_v<T> &&
-    std::is_nothrow_move_assignable_v<T> && std::is_trivial_v<T> && std::is_standard_layout_v<T>;
+concept SlotmapElementType = std::is_move_constructible_v<T> && std::is_move_assignable_v<T> &&
+                             std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>;
 
 template<SlotmapElementType T, std::size_t N>
 class SlotMap;
@@ -39,7 +38,7 @@ class SlotMap;
  * the slotmap, which is an asset to us since we can return this from functions that are already doing
  * type erasure shenanigans with coroutine_handle<>
  */
-class SlotMapHandle
+class SlotHandle
 {
 public:
     using IndexType = std::uint32_t;
@@ -47,21 +46,27 @@ public:
     static constexpr IndexType kInvalidIndex = std::numeric_limits<IndexType>::max();
     static constexpr GenerationType kInvalidGeneration = std::numeric_limits<GenerationType>::max();
 
-    constexpr SlotMapHandle() noexcept = default;
+    constexpr SlotHandle() noexcept = default;
 
     [[nodiscard]] constexpr bool IsValid() const noexcept
     {
         return index != kInvalidIndex;
     }
 
-    [[nodiscard]] friend constexpr bool operator==(const SlotMapHandle& lhs,
-                                                   const SlotMapHandle& rhs) noexcept = default;
+    [[nodiscard]] friend constexpr bool operator==(const SlotHandle& lhs,
+                                                   const SlotHandle& rhs) noexcept = default;
+
+    // because we keep generation data alongside index data, these are safe handles to copy
+    constexpr SlotHandle(const SlotHandle&) noexcept = default;
+    constexpr SlotHandle& operator=(const SlotHandle&) noexcept = default;
+    constexpr SlotHandle(SlotHandle&& other) noexcept = default;
+    constexpr SlotHandle& operator=(SlotHandle&& other) noexcept = default;
 
 private:
     template<SlotmapElementType T, std::size_t N>
     friend class SlotMap;
 
-    constexpr SlotMapHandle(IndexType index_in, GenerationType generation_in) noexcept
+    constexpr SlotHandle(IndexType index_in, GenerationType generation_in) noexcept
         : index(index_in),
           generation(generation_in)
     {
@@ -78,9 +83,9 @@ public:
     static_assert(N > 0, "SlotMap capacity must be greater than zero");
 
     using ValueType = T;
-    using HandleType = typename SlotMapHandle;
-    using IndexType = typename SlotMapHandle::IndexType;
-    using GenerationType = typename SlotMapHandle::GenerationType;
+    using HandleType = typename SlotHandle;
+    using IndexType = typename SlotHandle::IndexType;
+    using GenerationType = typename SlotHandle::GenerationType;
 
     constexpr SlotMap() noexcept
     {
@@ -111,12 +116,35 @@ public:
         return *this;
     }
 
-    template<typename... Args>
-    [[nodiscard]] SlotMapHandle Emplace(Args&&... args)
+    // for each valid slot in SlotMap at index i, calls predicate with the value at i.
+    // if true, erases that value
+    template<typename Predicate>
+    void EraseIf(Predicate predicate) noexcept(std::is_nothrow_destructible_v<T>)
     {
+        for (IndexType i = 0; i < N; ++i)
+        {
+            if (isOccupied(i) && predicate(slots[i].value))
+            {
+                slots[i].value.~T();
+                generations[i] += 1;
+
+                slots[i].nextFree = freeListHead;
+                freeListHead = i;
+
+                --size;
+            }
+        }
+    }
+
+    template<typename... Args>
+    [[nodiscard]] SlotHandle Emplace(Args&&... args)
+    {
+        // todo: maybe we want to make this a result too, as we could probably make it bubble up?
+        // this shouldn't be full, so for now I'm adding an assert so we at least catch it when it happens
         if (Full())
         {
-            return SlotMapHandle();
+            assert(false);
+            return SlotHandle();
         }
 
         const IndexType index = freeListHead;
@@ -128,20 +156,20 @@ public:
         generations[index] += 1;
         ++size;
 
-        return SlotMapHandle(index, generations[index]);
+        return SlotHandle(index, generations[index]);
     }
 
-    [[nodiscard]] SlotMapHandle Insert(const T& value)
+    [[nodiscard]] SlotHandle Insert(const T& value)
     {
         return Emplace(value);
     }
 
-    [[nodiscard]] SlotMapHandle Insert(T&& value)
+    [[nodiscard]] SlotHandle Insert(T&& value)
     {
         return Emplace(std::move(value));
     }
 
-    bool Erase(SlotMapHandle handle) noexcept(std::is_nothrow_destructible_v<T>)
+    bool Erase(SlotHandle handle) noexcept(std::is_nothrow_destructible_v<T>)
     {
         if (!Contains(handle))
         {
@@ -167,7 +195,7 @@ public:
         initFreeList();
     }
 
-    [[nodiscard]] bool Contains(SlotMapHandle handle) const noexcept
+    [[nodiscard]] bool Contains(SlotHandle handle) const noexcept
     {
         if (!handle.IsValid())
         {
@@ -182,7 +210,7 @@ public:
         return handle.generation == generations[handle.index];
     }
 
-    [[nodiscard]] T* TryGet(SlotMapHandle handle) noexcept
+    [[nodiscard]] T* TryGet(SlotHandle handle) noexcept
     {
         if (!Contains(handle))
         {
@@ -192,7 +220,7 @@ public:
         return &slots[handle.index].value;
     }
 
-    [[nodiscard]] const T* TryGet(SlotMapHandle handle) const noexcept
+    [[nodiscard]] const T* TryGet(SlotHandle handle) const noexcept
     {
         if (!Contains(handle))
         {
@@ -202,12 +230,12 @@ public:
         return &slots[handle.index].value;
     }
 
-    [[nodiscard]] T& operator[](SlotMapHandle handle) noexcept
+    [[nodiscard]] T& operator[](SlotHandle handle) noexcept
     {
         return slots[handle.index].value;
     }
 
-    [[nodiscard]] const T& operator[](SlotMapHandle handle) const noexcept
+    [[nodiscard]] const T& operator[](SlotHandle handle) const noexcept
     {
         return slots[handle.index].value;
     }
@@ -234,13 +262,13 @@ public:
 
     struct Entry
     {
-        SlotMapHandle handle;
+        SlotHandle handle;
         T& value;
     };
 
     struct ConstEntry
     {
-        SlotMapHandle handle;
+        SlotHandle handle;
         const T& value;
     };
 
@@ -400,9 +428,9 @@ private:
         return (generations[index_in] & 1u) != 0u;
     }
 
-    [[nodiscard]] SlotMapHandle makeHandle(IndexType index_in) const noexcept
+    [[nodiscard]] SlotHandle makeHandle(IndexType index_in) const noexcept
     {
-        return SlotMapHandle(index_in, generations[index_in]);
+        return SlotHandle(index_in, generations[index_in]);
     }
 
     void initFreeList() noexcept

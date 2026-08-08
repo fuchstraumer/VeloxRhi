@@ -2,6 +2,15 @@
 #include "Scheduler.hpp"
 #include "utility/SlotMap.hpp"
 
+namespace
+{
+    // todo: Finish creating shims to convert wgpu request statuses into RhiErrors [asap]
+    constexpr velox::RhiError RhiErrorFromWgpuAdapterStatus(wgpu::RequestAdapterStatus status) noexcept
+    {
+
+    }
+}
+
 namespace velox
 {
 
@@ -68,14 +77,16 @@ MapReadAwaitable::MapReadAwaitable(wgpu::Buffer _buffer,
 
 void MapReadAwaitable::await_suspend(std::coroutine_handle<> handle)
 {
-    // await suspend registers the callback, meaning we immediately return to the caller
-    // webgpu will call this captured callback, at which point it resumes the coroutine
-
-    // this is a deferred resume coroutine, register with context
-    SlotMapHandle slot;
+    std::expected<SlotHandle, RhiError> slot;
     if (scheduler)
     {
-        slot = scheduler->RegisterPending(handle.address());
+        slot = scheduler->Enqueue(handle);
+        if (!slot.has_value()) [[unlikely]]
+        {
+            // propagate error up and out immediately
+            result = std::unexpected(slot.error());
+            handle.resume();
+        }
     }
 
     buffer.MapAsync(wgpu::MapMode::Read,
@@ -87,7 +98,7 @@ void MapReadAwaitable::await_suspend(std::coroutine_handle<> handle)
                         if (status != wgpu::MapAsyncStatus::Success)
                         {
                             detail::PrintStatusMessage("MapBuffer", status, message);
-                            result = std::unexpected(RhiError::MapAsyncFailed);
+                            result = std::unexpected(RhiError::AsyncBufferMapFailed);
                         }
 
                         if (!scheduler)
@@ -96,7 +107,7 @@ void MapReadAwaitable::await_suspend(std::coroutine_handle<> handle)
                         }
                         else
                         {
-                            RhiError error = scheduler->MarkReady(std::move(slot));
+                            RhiError error = scheduler->MarkReady(std::move(slot.value()));
                             if (error != RhiError::Success) [[unlikely]]
                             {
                                 result = std::unexpected(error);
@@ -134,10 +145,16 @@ void MapWriteAwaitable::await_suspend(std::coroutine_handle<> handle)
     // webgpu will call this captured callback, at which point it resumes the coroutine
 
     // this is a deferred resume coroutine, register with context
-    SlotMapHandle slot;
+    std::expected<SlotHandle, RhiError> slot;
     if (scheduler)
     {
-        slot = scheduler->RegisterPending(handle.address());
+        slot = scheduler->Enqueue(handle);
+        if (!slot.has_value()) [[unlikely]]
+        {
+            // propagate error up and out immediately
+            result = std::unexpected(slot.error());
+            handle.resume();
+        }
     }
 
     buffer.MapAsync(wgpu::MapMode::Write,
@@ -149,7 +166,7 @@ void MapWriteAwaitable::await_suspend(std::coroutine_handle<> handle)
                         if (status != wgpu::MapAsyncStatus::Success)
                         {
                             detail::PrintStatusMessage("MapBuffer", status, message);
-                            result = std::unexpected(RhiError::MapAsyncFailed);
+                            result = std::unexpected(RhiError::AsyncBufferMapFailed);
                         }
 
                         if (!scheduler)
@@ -158,7 +175,7 @@ void MapWriteAwaitable::await_suspend(std::coroutine_handle<> handle)
                         }
                         else
                         {
-                            RhiError error = scheduler->MarkReady(std::move(slot));
+                            RhiError error = scheduler->MarkReady(std::move(slot.value()));
                             if (error != RhiError::Success) [[unlikely]]
                             {
                                 result = std::unexpected(error);
@@ -190,17 +207,24 @@ RenderPipelineAwaitable::RenderPipelineAwaitable(wgpu::Device _device,
 
 void RenderPipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
 {
-    SlotMapHandle slot;
+    std::expected<SlotHandle, RhiError> slot;
     if (scheduler)
     {
-        slot = scheduler->RegisterPending(handle.address());
+        slot = scheduler->Enqueue(handle);
+        if (!slot.has_value()) [[unlikely]]
+        {
+            // propagate error up and out immediately
+            result = std::unexpected(slot.error());
+            handle.resume();
+        }
     }
 
     device.CreateRenderPipelineAsync(
         &descriptor,
         wgpu::CallbackMode::AllowSpontaneous,
-        [handle, &slot, this](
-            wgpu::CreatePipelineAsyncStatus status, wgpu::RenderPipeline pipeline, wgpu::StringView message)
+        [handle, &slot, this](wgpu::CreatePipelineAsyncStatus status,
+                              wgpu::RenderPipeline pipeline,
+                              wgpu::StringView message)
         {
             if (status != wgpu::CreatePipelineAsyncStatus::Success)
             {
@@ -214,7 +238,7 @@ void RenderPipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
 
             if (scheduler)
             {
-                RhiError error = scheduler->MarkReady(slot);
+                RhiError error = scheduler->MarkReady(slot.value());
                 if (error != RhiError::Success) [[unlikely]]
                 {
                     result = std::unexpected(error);
@@ -234,10 +258,16 @@ Result<wgpu::RenderPipeline> RenderPipelineAwaitable::await_resume() noexcept
 
 void ComputePipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
 {
-    SlotMapHandle slot;
+    std::expected<SlotHandle, RhiError> slot;
     if (scheduler)
     {
-        slot = scheduler->RegisterPending(handle.address());
+        slot = scheduler->Enqueue(handle);
+        if (!slot.has_value()) [[unlikely]]
+        {
+            // propagate error up and out immediately
+            result = std::unexpected(slot.error());
+            handle.resume();
+        }
     }
 
     device.CreateComputePipelineAsync(
@@ -258,7 +288,7 @@ void ComputePipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
 
             if (scheduler)
             {
-                RhiError error = scheduler->MarkReady(slot);
+                RhiError error = scheduler->MarkReady(slot.value());
                 if (error != RhiError::Success) [[unlikely]]
                 {
                     result = std::unexpected(error);

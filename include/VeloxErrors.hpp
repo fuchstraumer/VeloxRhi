@@ -36,11 +36,14 @@ enum class RhiError : uint64_t
     PipelineCreationFailed = 18,
     // Start async function specific error codes (as needed)
     AsyncCallbackCanceled = 50,
-    MapAsyncAborted = 51, // what exactly does webgpu mean by this?
-    AsyncCreatePipelineValidationFailed = 52,
-    AsyncCreatePipelineInternalError = 53,
+    AsyncBufferMapAborted = 55,
+    AsyncBufferMapFailed = 56,
+    AsyncCreatePipelineValidationFailed = 60,
+    AsyncCreatePipelineInternalError = 61,
 
-    MapAsyncFailed = 7,
+    AsyncSchedulerEnqueueFailed = 70,
+    AsyncSchedulerMarkReadyFailed = 71,
+
     // Dawn-specific errors
     // GLFW errors
     GLFWInitFailed = 300,
