@@ -1,17 +1,11 @@
 #pragma once
-#ifndef VELOX_CONTEXT_IMPL_HPP
-#define VELOX_CONTEXT_IMPL_CPP
+#ifndef VELOX_SCHEDULER_HPP
+#define VELOX_SCHEDULER_HPP
 #include "VeloxErrors.hpp"
 #include "utility/SlotMap.hpp"
 #include <coroutine>
 #include <expected>
 
-/**
- * This file is mostly to serve as a "bus" for tying together our coroutines in AsyncTasks,
- * the SlotMap instances in Context, and all without creating a really gnarly and hard to
- * follow sourcetree of dependencies and control flow. It's still not great, but I'm at a loss
- * currently for how to do better
- */
 namespace velox
 {
 
@@ -54,4 +48,4 @@ private:
 
 } // namespace velox
 
-#endif // !VELOX_CONTEXT_IMPL_CPP
+#endif // !VELOX_SCHEDULER_HPP
