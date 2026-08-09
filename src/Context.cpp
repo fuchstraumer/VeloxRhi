@@ -289,12 +289,15 @@ Result<Context::BootstrapPhase> Context::bootstrapAdapter()
             adapter = std::move(adapterResult->value());
             // advance phase
             phase = BootstrapPhase::RequestingDevice;
+            return phase;
         }
     }
     else
     {
         return BootstrapPhase::RequestingAdapter;
     }
+
+    return BootstrapPhase::Invalid;
 }
 
 wgpu::DeviceDescriptor Context::getDeviceDescriptor() const
