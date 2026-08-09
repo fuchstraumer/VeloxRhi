@@ -75,6 +75,7 @@ public:
     ~Context();
 
     // Async dispatches adapter and device request, returning control flow back to caller
+    BootstrapPhase GetCurrentPhase() const noexcept;
     Result<BootstrapPhase> RunBootstrap();
     ResizeStatus Resize(uint32_t width, uint32_t height);
     wgpu::TextureView AcquireNextFrame();

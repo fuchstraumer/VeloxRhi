@@ -84,8 +84,18 @@ Context::~Context()
     glfwTerminate();
 }
 
+Context::BootstrapPhase Context::GetCurrentPhase() const noexcept
+{
+    return phase;
+}
+
 Result<Context::BootstrapPhase> Context::RunBootstrap()
 {
+    if (phase == Context::BootstrapPhase::Complete)
+    {
+        return phase;
+    }
+
     assert(phase > BootstrapPhase::Invalid && "RunBootstrap called before Instance creation completed");
     switch (phase)
     {
@@ -95,9 +105,23 @@ Result<Context::BootstrapPhase> Context::RunBootstrap()
     case BootstrapPhase::InstanceCreated:
         [[fallthrough]];
     case BootstrapPhase::RequestingAdapter:
-        return bootstrapAdapter();
+    {
+        Result<Context::BootstrapPhase> result = bootstrapAdapter();
+        if (result.has_value())
+        {
+            phase = *result;
+        }
+        return result;
+    }
     case BootstrapPhase::RequestingDevice:
-        return bootstrapDevice();
+    {
+        Result<Context::BootstrapPhase> result = bootstrapDevice();
+        if (result.has_value())
+        {
+            phase = *result;
+        }
+        return result;
+    }
     case BootstrapPhase::Complete:
         std::println(stderr, "Context Bootstrap process completed. But how did you get here?");
         return BootstrapPhase::Complete;
@@ -225,7 +249,7 @@ Result<wgpu::Instance> Context::requestInstance()
     {
         return std::unexpected(RhiError::InstanceRequestFailed);
     }
-    std::println(stderr, "[velox][context] Instance creation successful.");
+    std::println(stderr, "    [velox][context] Instance creation successful.");
     return std::move(instance);
 }
 
@@ -291,10 +315,8 @@ Result<Context::BootstrapPhase> Context::bootstrapAdapter()
         else
         {
             adapter = std::move(adapterResult->value());
-            // advance phase
-            phase = BootstrapPhase::RequestingDevice;
-            std::println(stderr, "[velox][context] Adapter creation successful.");
-            return phase;
+            std::println(stderr, "    [velox][context] Adapter creation successful.");
+            return BootstrapPhase::RequestingDevice;
         }
     }
     else
@@ -329,7 +351,6 @@ Result<Context::BootstrapPhase> Context::bootstrapDevice()
     if (!deviceFuture && !device)
     {
         deviceFuture = RequestDevice(adapter, std::move(getDeviceDescriptor()), scheduler.get());
-        phase = BootstrapPhase::RequestingDevice;
     }
 
     if (auto deviceResult = deviceFuture.TryGet())
@@ -347,7 +368,8 @@ Result<Context::BootstrapPhase> Context::bootstrapDevice()
             {
                 surface = surfaceResult.value();
                 configureSurface();
-                std::println(stderr, "[velox][context] Device creation successful.");
+                queue = device.GetQueue();
+                std::println(stderr, "    [velox][context] Device creation successful.");
                 return BootstrapPhase::Complete;
             }
             else
@@ -391,7 +413,7 @@ void Context::configureSurface()
     {
         supportedFormats += std::format(" {} |", magic_enum::enum_name(capabilities.formats[i]));
     }
-    std::println(stderr, "[velox][context] Surface supported formats:{}", supportedFormats);
+    std::println(stderr, "    [velox][context] Surface supported formats:{}", supportedFormats);
 
     auto format_iter =
         std::find_if(capabilities.formats, capabilities.formats + capabilities.formatCount, format_match);
@@ -400,7 +422,7 @@ void Context::configureSurface()
     {
         surfaceFormat = *format_iter;
         std::println(stderr,
-                     "[velox][context] Using preferred surface format {}",
+                     "    [velox][context] Using preferred surface format {}",
                      magic_enum::enum_name(surfaceFormat));
     }
     else
@@ -408,7 +430,7 @@ void Context::configureSurface()
         // if we can't find our preferred format, just pick the first one the surface supports
         surfaceFormat = capabilities.formats[0];
         std::println(stderr,
-                     "[velox][context] Preferred surface format {} not supported by surface, using "
+                     "    [velox][context] Preferred surface format {} not supported by surface, using "
                      "{} instead",
                      magic_enum::enum_name(createInfo.PreferredSurfaceFormat),
                      magic_enum::enum_name(surfaceFormat));

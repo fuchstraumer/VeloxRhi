@@ -39,26 +39,29 @@ Result<Application::LifecyclePhase> Application::RunSetup() noexcept
     {
         phase = LifecyclePhase::Initialization;
     }
-
-    Result<Context::BootstrapPhase> bootstrap = contextPtr->RunBootstrap();
-    if (!bootstrap)
+    
+    if (contextPtr->GetCurrentPhase() != Context::BootstrapPhase::Complete)
     {
-        return std::unexpected(bootstrap.error());
-    }
-
-    if (bootstrap.value() != Context::BootstrapPhase::Complete)
-    {
-        // still running init, until bootstrap finishes
+        Result<Context::BootstrapPhase> bootstrap = contextPtr->RunBootstrap();
+        if (!bootstrap)
+        {
+            return std::unexpected(bootstrap.error());
+        }
         return LifecyclePhase::Initialization;
     }
-
-    Result<LifecyclePhase> setup = OnSetup();
-    if (setup)
+    else
     {
-        phase = *setup;
+        Result<LifecyclePhase> setup = OnSetup();
+        if (setup.has_value())
+        {
+            phase = *setup;
+        }
+        else
+        {
+            return std::unexpected(setup.error());
+        }
+        return setup;
     }
-
-    return setup;
 }
 
 Result<Application::LifecyclePhase> Application::OnSetup() noexcept

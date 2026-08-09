@@ -115,6 +115,7 @@ public:
         renderPass.End();
 
         wgpu::CommandBuffer commandBuffer = encoder.Finish();
+        auto queue = context.GetQueue(); assert(queue);
         context.GetQueue().Submit(1, &commandBuffer);
     }
 

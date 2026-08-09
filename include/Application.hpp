@@ -26,7 +26,6 @@ class Application
     Application& operator=(const Application&) = delete;
     Context* contextPtr;
 public:
-
     Application(Context* context) noexcept;
     virtual ~Application();
 
