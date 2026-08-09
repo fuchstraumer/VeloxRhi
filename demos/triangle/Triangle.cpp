@@ -10,7 +10,6 @@
 #include <emscripten/html5.h>
 #endif
 #include "TestShader.hpp"
-#include "HdrTestPatternShader.hpp"
 #include <print>
 
 using namespace velox;
@@ -27,7 +26,7 @@ public:
         if (!shaderModule)
         {
             ShaderSourceWGSL wgslSource{};
-            wgslSource.code = hdrTestPatternShaderSource;
+            wgslSource.code = shaderSource;
             ShaderModuleDescriptor shaderDesc{};
             shaderDesc.nextInChain = &wgslSource;
             shaderModule = GetContext().GetDevice().CreateShaderModule(&shaderDesc);

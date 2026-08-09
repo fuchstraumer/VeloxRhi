@@ -7,6 +7,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 # cmake/ contains our own FindVulkanHeaders.cmake; must be set before any find_package calls
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -20,30 +23,27 @@ if (NOT EMSCRIPTEN)
     set(VulkanHeaders_INCLUDE_DIR ${Vulkan_INCLUDE_DIR} CACHE PATH "" FORCE)
 endif()
 
-
-# One should really not be modifying the CMAKE_CXX_FLAGS directly,
-# but I need to make sure these are passed down to child projects
-# and do keep things fairly low risk and minimal at least
 if (MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # MSVC specific flags
     # /MP: Tells cl.exe to multithread
     # /bigobj: Increases number of sections in .obj (slang can bump into this ime)
     # /arch:AVX2: Enables AVX2 instructions
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP /bigobj /arch:AVX2 /Gy")
+    add_compile_options(/MP /bigobj /arch:AVX2 /Gy)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # Clang specific flags
     if (NOT EMSCRIPTEN)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2")
+        add_compile_options(-mavx2)
     endif()
     if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
         # emulate bigobj flag as, again, slang can break on this
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj")
+        add_compile_options(/bigobj)
     elseif(MINGW)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mbig-obj")
+        add_compile_options(-mbig-obj)
     endif()
 endif()
 
 if (NOT EMSCRIPTEN)
+
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "Build the GLFW documentation")
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Build the GLFW example programs")
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "Build the GLFW test programs")
@@ -54,6 +54,7 @@ if (NOT EMSCRIPTEN)
     include(cmake/ConfigureSlang.cmake)
     add_subdirectory(third_party/slang EXCLUDE_FROM_ALL)
     organize_slang_targets()
+
 endif()
 
 include(cmake/ConfigureDawn.cmake)
@@ -99,20 +100,19 @@ add_custom_command(
     VERBATIM)
 set_source_files_properties(${OCEAN_FFT_GENERATED_OUTPUTS} PROPERTIES GENERATED TRUE)
 
-# Ensures slang file generates even if OceanFFT target isn't built first
-
 set(VeloxRhi_Headers
     "${CMAKE_CURRENT_SOURCE_DIR}/include/Application.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/AsyncTasks.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/Context.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/CoroutineAllocator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/Future.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/Scheduler.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ShaderUtils.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/TestShader.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/VeloxErrors.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/SlotMap.hpp")
 
 set(VeloxRhi_SOURCES
-    main.cpp
     ${IMGUI_SOURCES}
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Application.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/AsyncTasks.cpp"
@@ -121,20 +121,23 @@ set(VeloxRhi_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Scheduler.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ShaderUtils.cpp")
 
-add_executable(VeloxRhi ${VeloxRhi_SOURCES} ${VeloxRhi_Headers} ${OCEAN_FFT_GENERATED_OUTPUTS})
-target_include_directories(VeloxRhi PRIVATE
+add_library(VeloxRhi STATIC ${VeloxRhi_SOURCES} ${VeloxRhi_Headers} ${OCEAN_FFT_GENERATED_OUTPUTS})
+target_include_directories(VeloxRhi PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui
     ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 if (NOT EMSCRIPTEN)
-    target_include_directories(VeloxRhi PRIVATE
+    target_include_directories(VeloxRhi PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/glfw/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dawn/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/slang/include)
 endif()
 # set required definition for imgui backend (dawn)
-target_compile_definitions(VeloxRhi PRIVATE IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
+target_compile_definitions(VeloxRhi PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
+if (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
+    target_compile_definitions(VeloxRhi PUBLIC VELOX_ENABLE_DIAGNOSTICS)
+endif()
 
 set(VeloxRhi_Shaders
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/OceanFFT.slang"
@@ -155,30 +158,16 @@ source_group("rhi\\shaders" FILES ${VeloxRhi_Shaders})
 source_group("rhi\\generated" FILES ${OCEAN_FFT_GENERATED_OUTPUTS})
 
 if (EMSCRIPTEN)
-    target_compile_options(VeloxRhi PRIVATE
-        "-g"
-        "-O1"
-        "-flto"
-        "-fno-rtti"
-        "-fno-exceptions"
-        "-msimd128"
-    )
-    target_link_options(VeloxRhi PRIVATE
-        "-g"
-        "-sASYNCIFY=1"
-        "-O1"
-        "-flto"
-        "-sEXIT_RUNTIME=1"
-        "-sNO_FILESYSTEM=1"
-        "-sWASM=1"
-        "-sMALLOC=emmalloc"
-        "-sUSE_GLFW=3"                           # Use Emscripten's GLFW port
-    )
-    target_link_libraries(VeloxRhi PRIVATE emdawnwebgpu_cpp webgpu_glfw magic_enum::magic_enum)
-    set_target_properties(VeloxRhi PROPERTIES SUFFIX ".html")
+    target_link_libraries(VeloxRhi PUBLIC emdawnwebgpu_cpp webgpu_glfw magic_enum::magic_enum)
 else()
-    target_link_libraries(VeloxRhi PRIVATE webgpu_dawn glfw webgpu_glfw webgpu_cpp)
+    target_link_libraries(VeloxRhi PUBLIC webgpu_dawn glfw webgpu_glfw webgpu_cpp)
     if (WIN32)
-        target_link_libraries(VeloxRhi PRIVATE dawn_native magic_enum::magic_enum)
+        target_link_libraries(VeloxRhi PUBLIC dawn_native magic_enum::magic_enum)
     endif()
+endif()
+
+option(VELOX_RHI_BUILD_DEMOS "Build demo executables for the engine" ON)
+
+if(VELOX_RHI_BUILD_DEMOS)
+    add_subdirectory(demos)
 endif()

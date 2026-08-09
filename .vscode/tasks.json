@@ -14,7 +14,7 @@
             "args" : [
                 "--no_browser",
                 "--port", "8080",
-                "VeloxRhi.html"
+                "${command:cmake.launchTargetName}.html"
             ],
             "options": {
                 "cwd": "${command:cmake.getLaunchTargetDirectory}"

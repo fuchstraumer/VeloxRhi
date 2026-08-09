@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch VeloxRhi [Native]",
+            "name": "Launch Triangle Demo [Native]",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${command:cmake.launchTargetPath}",
@@ -19,10 +19,9 @@
             "name" : "Launch/Debug Engine [Web]",
             "type" : "chrome",
             "request": "launch",
-            "url" : "http://localhost:8080/${command:cmake.launchTargetFilename}",
+            "url" : "http://localhost:8080/${command:cmake.launchTargetFilename}.html",
             "webRoot": "${workspaceFolder}",
-            "preLaunchTask": "Serve VeloxRhi demo with EmRun",
-            "runtimeArgs": [ "--enable-unsafe-webgpu" ]
+            "preLaunchTask": "Serve VeloxRhi demo with EmRun"
         },
         {
             "name": "Launch Shader Compiler [Release]",

@@ -7,20 +7,12 @@
 #include <memory>
 #include <array>
 #include <atomic>
-#ifndef NDEBUG
+#ifdef VELOX_ENABLE_DIAGNOSTICS
 #include <print>
 #endif
 
 namespace velox
 {
-
-#ifndef NDEBUG
-static std::size_t NumFramesAllocated{0u};
-static std::size_t NumFramesDeallocated{0u};
-static std::size_t BytesAllocatedFreeList{0u};
-static std::size_t BytesDeallocatedFreeList{0u};
-static std::size_t BytesAllocatedMalloc{0u};
-#endif
 
 /**@brief Simple O(1) freelist memory arena for Coroutines, but using statically allocated memory
  * so we can reduce how many dynamic allocations we make while still having enough memory to work with
@@ -28,6 +20,15 @@ static std::size_t BytesAllocatedMalloc{0u};
 template<std::size_t BlockSizeInBytes, size_t PoolBlockCapacity>
 class CoroutinePool
 {
+
+#ifdef VELOX_ENABLE_DIAGNOSTICS
+    inline static std::size_t NumFramesAllocated{0u};
+    inline static std::size_t NumFramesDeallocated{0u};
+    inline static std::size_t BytesAllocatedFreeList{0u};
+    inline static std::size_t BytesDeallocatedFreeList{0u};
+    inline static std::size_t BytesAllocatedMalloc{0u};
+#endif
+
     // alignas pointer type for platform
     constexpr static size_t k_ArraySizeInBytes = BlockSizeInBytes * PoolBlockCapacity;
     alignas(16) std::array<std::byte, k_ArraySizeInBytes> memory;
@@ -63,13 +64,13 @@ public:
 
     ~CoroutinePool()
     {
-#ifndef NDEBUG
+#ifdef VELOX_ENABLE_DIAGNOSTICS
         std::println("[velox][async] Coroutines allocated: {}", NumFramesAllocated);
         std::println("[velox][async] Coroutines deallocated: {}", NumFramesDeallocated);
-        std::println("[velox][async] Coroutine frame bytes allocated: ", BytesAllocatedFreeList);
-        std::println("[velox][async] Coroutine frame bytes deallocated: ", BytesDeallocatedFreeList);
+        std::println("[velox][async] Coroutine frame bytes allocated: {}", BytesAllocatedFreeList);
+        std::println("[velox][async] Coroutine frame bytes deallocated: {}", BytesDeallocatedFreeList);
         const size_t blockOverhead = BytesDeallocatedFreeList - BytesAllocatedFreeList;
-        std::println("[velox][async] Byte overhead due to block size: ", blockOverhead);
+        std::println("[velox][async] Byte overhead due to block size: {}", blockOverhead);
         std::println("[velox][async] Bytes allocated via malloc(): {}", BytesAllocatedMalloc);
 #endif
     }
@@ -78,7 +79,7 @@ public:
     {
         if (size <= BlockSizeInBytes) [[likely]]
         {
-#ifndef NDEBUG
+#ifdef VELOX_ENABLE_DIAGNOSTICS
             ++NumFramesAllocated;
             BytesAllocatedFreeList += size;
 #endif
@@ -86,7 +87,7 @@ public:
         }
         else
         {
-#ifndef NDEBUG
+#ifdef VELOX_ENABLE_DIAGNOSTICS
             ++NumFramesAllocated;
             BytesAllocatedMalloc += size;
             std::println("[velox][async] CoroutinePool falling back to malloc for frame of {} bytes", size);
@@ -99,7 +100,7 @@ public:
     {
         if (size <= BlockSizeInBytes) [[likely]]
         {
-#ifndef NDEBUG
+#ifdef VELOX_ENABLE_DIAGNOSTICS
             ++NumFramesDeallocated;
             BytesDeallocatedFreeList += BlockSizeInBytes;
 #endif
@@ -107,7 +108,7 @@ public:
         }
         else
         {
-#ifndef NDEBUG
+#ifdef VELOX_ENABLE_DIAGNOSTICS
             ++NumFramesDeallocated;
 #endif
             free(ptr);
