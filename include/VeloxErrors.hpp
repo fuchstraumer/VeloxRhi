@@ -35,6 +35,7 @@ enum class RhiError : uint64_t
     BufferMapFailed = 17,
     PipelineCreationFailed = 18,
     BootstrapInInvalidState = 19,
+    ShaderModuleCreationFailed = 20,
     // Start async function specific error codes (as needed)
     AsyncCallbackCanceled = 50,
     AsyncBufferMapAborted = 55,
