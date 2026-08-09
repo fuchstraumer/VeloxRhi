@@ -29,7 +29,7 @@ public:
             wgslSource.code = hdrTestPatternShaderSource;
             ShaderModuleDescriptor shaderDesc{};
             shaderDesc.nextInChain = &wgslSource;
-            ShaderModule shaderModule = GetContext().GetDevice().CreateShaderModule(&shaderDesc);
+            shaderModule = GetContext().GetDevice().CreateShaderModule(&shaderDesc);
             if (!shaderModule)
             {
                 return std::unexpected(RhiError::ShaderModuleCreationFailed);
@@ -90,6 +90,8 @@ public:
                 return std::unexpected(result.error());
             }
         }
+
+        return LifecyclePhase::Initialization;
     }
 
     void OnRender(wgpu::TextureView& backbuffer) final
