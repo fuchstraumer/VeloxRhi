@@ -4,7 +4,6 @@
 #include "VeloxErrors.hpp"
 #include "utility/SlotMap.hpp"
 #include <coroutine>
-#include <expected>
 #include <memory>
 #include <webgpu/webgpu_cpp.h>
 
@@ -35,8 +34,6 @@ namespace detail
 
 } // namespace detail
 
-template<typename T>
-using Result = std::expected<T, RhiError>;
 
 // todo: Since everything needs a Scheduler pointer at this point, that should be created by the Future
 // and used with await_transform so that it gets forwarded without us needing to pass it

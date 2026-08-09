@@ -52,8 +52,12 @@ enum class RhiError : uint64_t
     ImguiContextInitFailed = 400,
 };
 
-template<typename T, typename E> requires(!std::is_void_v<T>)
-T ValidOrExit(std::expected<T, E> result)
+
+template<typename T>
+using Result = std::expected<T, RhiError>;
+
+template<typename T> requires(!std::is_void_v<T>)
+T ValidOrExit(Result<T> result)
 {
     if (!result)
     {
@@ -69,8 +73,8 @@ T ValidOrExit(std::expected<T, E> result)
     return result.value();
 }
 
-template<typename T, typename E> requires(std::is_void_v<T>)
-void ValidOrExit(std::expected<T, E> result)
+template<typename T> requires(std::is_void_v<T>)
+void ValidOrExit(Result<T> result)
 {
     if (!result)
     {
@@ -84,6 +88,7 @@ void ValidOrExit(std::expected<T, E> result)
 #endif
     }
 }
+
 
 } // namespace velox
 

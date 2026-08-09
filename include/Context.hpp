@@ -2,8 +2,8 @@
 
 #ifndef VELOX_WEB_GPU_CONTEXT_HPP
 #define VELOX_WEB_GPU_CONTEXT_HPP
-#include "utility/SlotMap.hpp"
 #include "VeloxErrors.hpp"
+#include "Future.hpp"
 #include <cstdint>
 #include <span>
 #include <memory>
@@ -59,12 +59,18 @@ class Context
     Context& operator=(const Context&) = delete;
 
 public:
-    Context(const ContextCreateInfo& createInfo);
-    ~Context();
+    enum class BootstrapPhase : uint8_t
+    {
+        Invalid = 0,
+        InstanceCreated,
+        RequestingAdapter,
+        RequestingDevice,
+        Complete
+    };
 
-    // use coroutines to do async work, so we can avoid asyncify
-    // we can't use coroutines in a ctor, so it has to be a separate function!
-    //Task<std::expected<bool, RhiError>> InitWebGPU(const ContextCreateInfo& createInfo);
+    /* This *only* sets the createInfo and creates the instance */
+    Context(ContextCreateInfo _createInfo);
+    ~Context();
 
     ResizeStatus Resize(uint32_t width, uint32_t height);
     wgpu::TextureView AcquireNextFrame();
@@ -83,18 +89,23 @@ public:
     Scheduler* GetScheduler() noexcept;
 
 private:
-    std::expected<wgpu::Instance, RhiError> requestInstance(const ContextCreateInfo& createInfo);
-    wgpu::RequestAdapterOptions getAdapterOptions(const ContextCreateInfo& createInfo) const;
-    std::expected<wgpu::Adapter, RhiError> requestAdapter(const ContextCreateInfo& createInfo);
-    wgpu::DeviceDescriptor getDeviceDescriptor(const ContextCreateInfo& createInfo) const;
-    std::expected<wgpu::Device, RhiError> requestDevice(const ContextCreateInfo& createInfo);
-    std::expected<GLFWwindow*, RhiError> createNativeWindow(const ContextCreateInfo& createInfo);
-    std::expected<wgpu::Surface, RhiError> createSurface(const ContextCreateInfo& createInfo);
 
-    void configureSurface(const ContextCreateInfo& createInfo);
+    ContextCreateInfo createInfo;
+    BootstrapPhase phase{ BootstrapPhase::Invalid };
+    std::unique_ptr<Scheduler> scheduler{ nullptr };
+
+    Result<wgpu::Instance> requestInstance();
+    Result<GLFWwindow*> createNativeWindow();
+    wgpu::RequestAdapterOptions getAdapterOptions() const;
+    wgpu::DeviceDescriptor getDeviceDescriptor() const;
+    Result<wgpu::Surface> createSurface();
+
+    void configureSurface();
 
     wgpu::Instance instance;
+    AdapterFuture adapterFuture;
     wgpu::Adapter adapter;
+    DeviceFuture deviceFuture;
     wgpu::Device device;
     wgpu::Queue queue;
     GLFWwindow* nativeWindow{ nullptr };
@@ -102,8 +113,6 @@ private:
     wgpu::Surface surface;
     // we store the surface config to make reconfiguring not need the whole create info
     wgpu::SurfaceConfiguration surfaceConfig{};
-
-    std::unique_ptr<Scheduler> scheduler{ nullptr };
 };
 
 } // namespace velox

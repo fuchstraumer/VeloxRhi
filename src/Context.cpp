@@ -1,10 +1,10 @@
 #include "Context.hpp"
 #include "AsyncTasks.hpp"
 #include "Scheduler.hpp"
-#include <print>
+#include "magic_enum/magic_enum.hpp"
 #include <algorithm>
 #include <coroutine>
-#include "magic_enum/magic_enum.hpp"
+#include <print>
 #include <webgpu/webgpu_glfw.h>
 
 #define GLFW_INCLUDE_NONE
@@ -72,11 +72,15 @@ void LogDeviceLost([[maybe_unused]] const wgpu::Device&,
 namespace velox
 {
 
-Context::Context(const ContextCreateInfo& createInfo) : scheduler{ std::make_unique<Scheduler>() }
+Context::Context(ContextCreateInfo _createInfo)
+    : createInfo{ std::forward<ContextCreateInfo>(_createInfo) },
+      phase{ BootstrapPhase::Invalid },
+      scheduler{ std::make_unique<Scheduler>() }
 {
     // only these two objects aren't dependent on async work
-    instance = ValidOrExit(requestInstance(createInfo));
-    nativeWindow = ValidOrExit(createNativeWindow(createInfo));
+    instance = ValidOrExit(requestInstance());
+    nativeWindow = ValidOrExit(createNativeWindow());
+    phase = BootstrapPhase::InstanceCreated;
 }
 
 /*
@@ -222,7 +226,12 @@ GLFWwindow* Context::GetNativeWindow() const noexcept
 }
 #endif
 
-std::expected<wgpu::Instance, RhiError> Context::requestInstance(const ContextCreateInfo& createInfo)
+Scheduler* Context::GetScheduler() noexcept
+{
+    return scheduler.get();
+}
+
+Result<wgpu::Instance> Context::requestInstance()
 {
     wgpu::InstanceDescriptor instanceDesc{};
     const wgpu::InstanceFeatureName requiredFeatures[] = { wgpu::InstanceFeatureName::TimedWaitAny };
@@ -249,104 +258,7 @@ std::expected<wgpu::Instance, RhiError> Context::requestInstance(const ContextCr
     return std::move(instance);
 }
 
-wgpu::RequestAdapterOptions Context::getAdapterOptions(const ContextCreateInfo& createInfo) const
-{
-    wgpu::RequestAdapterOptions options{};
-#ifndef __EMSCRIPTEN__
-    // can't use vulkan on desktop, as nvidia drivers have severe bugs with f16
-    // our entire framework is built on f16 LMAO
-    // https://issues.chromium.org/issues/42251215
-    options.backendType = wgpu::BackendType::D3D12;
-#endif
-    options.featureLevel = createInfo.FeatureLevel;
-    options.powerPreference = createInfo.PowerPreference;
-    return options;
-}
-
-std::expected<wgpu::Adapter, RhiError> Context::requestAdapter(const ContextCreateInfo& createInfo)
-{
-    wgpu::RequestAdapterOptions options = getAdapterOptions(createInfo);
-    wgpu::Adapter result_adapter;
-    wgpu::Future future = instance.RequestAdapter(
-        &options,
-        wgpu::CallbackMode::WaitAnyOnly,
-        [&result_adapter](wgpu::RequestAdapterStatus status, wgpu::Adapter result, wgpu::StringView message)
-        {
-            if (status == wgpu::RequestAdapterStatus::Success)
-            {
-                result_adapter = std::move(result);
-            }
-            else
-            {
-                result_adapter = wgpu::Adapter{}; // ensure it's empty
-                std::println(stderr,
-                             "[velox][context] RequestAdapter failed: {}",
-                             std::string_view(message.data, message.length));
-            }
-        });
-
-    instance.WaitAny(future, UINT64_MAX);
-
-    if (!result_adapter)
-    {
-        return std::unexpected(RhiError::AdapterRequestFailed);
-    }
-
-    return result_adapter;
-}
-
-wgpu::DeviceDescriptor Context::getDeviceDescriptor(const ContextCreateInfo& createInfo) const
-{
-    wgpu::DeviceDescriptor deviceDesc{};
-    deviceDesc.label = createInfo.ApplicationName;
-    deviceDesc.SetUncapturedErrorCallback(LogUncapturedError);
-    deviceDesc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous, LogDeviceLost);
-    if (!createInfo.RequiredFeatures.empty())
-    {
-        deviceDesc.requiredFeatureCount = createInfo.RequiredFeatures.size();
-        deviceDesc.requiredFeatures = createInfo.RequiredFeatures.data();
-    }
-    else
-    {
-        deviceDesc.requiredFeatureCount = 0;
-        deviceDesc.requiredFeatures = nullptr;
-    }
-    return deviceDesc;
-}
-
-std::expected<wgpu::Device, RhiError> Context::requestDevice(const ContextCreateInfo& createInfo)
-{
-    wgpu::DeviceDescriptor deviceDesc = getDeviceDescriptor(createInfo);
-    wgpu::Device result_device;
-    wgpu::Future future = adapter.RequestDevice(
-        &deviceDesc,
-        wgpu::CallbackMode::WaitAnyOnly,
-        [&result_device](wgpu::RequestDeviceStatus status, wgpu::Device result, wgpu::StringView message)
-        {
-            if (status == wgpu::RequestDeviceStatus::Success)
-            {
-                result_device = std::move(result);
-            }
-            else
-            {
-                result_device = wgpu::Device{}; // ensure it's empty
-                std::println(stderr,
-                             "[velox][context] RequestDevice failed: {}",
-                             std::string_view(message.data, message.length));
-            }
-        });
-
-    instance.WaitAny(future, UINT64_MAX);
-
-    if (!result_device)
-    {
-        return std::unexpected(RhiError::DeviceRequestFailed);
-    }
-
-    return result_device;
-}
-
-std::expected<GLFWwindow*, RhiError> Context::createNativeWindow(const ContextCreateInfo& createInfo)
+Result<GLFWwindow*> Context::createNativeWindow()
 {
     // todo: We have a bunch of nice example code for how to set backbuffer bit depth and color
     // stuff in DiamondDogs, along with configuring other parameters for the window. We should do
@@ -377,7 +289,41 @@ std::expected<GLFWwindow*, RhiError> Context::createNativeWindow(const ContextCr
     return window;
 }
 
-std::expected<wgpu::Surface, RhiError> Context::createSurface(const ContextCreateInfo& /*createInfo*/)
+wgpu::RequestAdapterOptions Context::getAdapterOptions() const
+{
+    wgpu::RequestAdapterOptions options{};
+#ifndef __EMSCRIPTEN__
+    // can't use vulkan on desktop, as nvidia drivers have severe bugs with f16
+    // our entire framework is built on f16 LMAO
+    // https://issues.chromium.org/issues/42251215
+    options.backendType = wgpu::BackendType::D3D12;
+#endif
+    options.featureLevel = createInfo.FeatureLevel;
+    options.powerPreference = createInfo.PowerPreference;
+    return options;
+}
+
+wgpu::DeviceDescriptor Context::getDeviceDescriptor() const
+{
+    wgpu::DeviceDescriptor deviceDesc{};
+    deviceDesc.label = createInfo.ApplicationName;
+    deviceDesc.SetUncapturedErrorCallback(LogUncapturedError);
+    deviceDesc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous, LogDeviceLost);
+    if (!createInfo.RequiredFeatures.empty())
+    {
+        deviceDesc.requiredFeatureCount = createInfo.RequiredFeatures.size();
+        deviceDesc.requiredFeatures = createInfo.RequiredFeatures.data();
+    }
+    else
+    {
+        deviceDesc.requiredFeatureCount = 0;
+        deviceDesc.requiredFeatures = nullptr;
+    }
+    return deviceDesc;
+}
+
+
+Result<wgpu::Surface> Context::createSurface()
 {
     // todo: this GLFW shim sets the descriptor based on GLFW hints, but for things like colorspaces
     // this won't pass through at least it didn't in DiamondDogs, not without a good bit of extra
@@ -390,12 +336,12 @@ std::expected<wgpu::Surface, RhiError> Context::createSurface(const ContextCreat
     return surface;
 }
 
-void Context::configureSurface(const ContextCreateInfo& createInfo)
+void Context::configureSurface()
 {
     wgpu::SurfaceCapabilities capabilities{};
     surface.GetCapabilities(adapter, &capabilities);
 
-    auto format_match = [&createInfo](wgpu::TextureFormat format)
+    auto format_match = [this](wgpu::TextureFormat format)
     {
         return format == createInfo.PreferredSurfaceFormat;
     };

@@ -4,7 +4,6 @@
 #include "VeloxErrors.hpp"
 #include "utility/SlotMap.hpp"
 #include <coroutine>
-#include <expected>
 
 namespace velox
 {
@@ -30,6 +29,7 @@ public:
     std::coroutine_handle<> GetHandle() const noexcept;
 };
 
+// todo: Eventually we will want continuations, sort them so continuation series' are memory adjacent then
 struct Scheduler
 {
     Scheduler();
