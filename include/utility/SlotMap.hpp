@@ -137,7 +137,7 @@ public:
     }
 
     template<typename... Args>
-    [[nodiscard]] SlotHandle Emplace(Args&&... args)
+    [[nodiscard]] SlotHandle Emplace(Args&&... args) noexcept(std::is_nothrow_constructible_v<T>)
     {
         // todo: maybe we want to make this a result too, as we could probably make it bubble up?
         // this shouldn't be full, so for now I'm adding an assert so we at least catch it when it happens
