@@ -56,7 +56,10 @@ struct Future
 
     std::coroutine_handle<promise_type> handle;
 
-    explicit Future(std::coroutine_handle<promise_type> _handle) noexcept
+    constexpr Future() noexcept : handle{ nullptr }
+    {}
+
+    constexpr explicit Future(std::coroutine_handle<promise_type> _handle) noexcept
         : handle{ _handle }
     {
     }
