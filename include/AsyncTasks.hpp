@@ -1,8 +1,8 @@
 #pragma once
 #ifndef VELOX_RHI_ASYNC_TASKS_HPP
 #define VELOX_RHI_ASYNC_TASKS_HPP
-#include "utility/SlotMap.hpp"
 #include "VeloxErrors.hpp"
+#include "utility/SlotMap.hpp"
 #include <coroutine>
 #include <expected>
 #include <memory>
@@ -13,16 +13,6 @@
 #include <print>
 #endif
 
-/**
- * @brief Various helper functions for scheduling and marshalling async tasks for WebGPU, namely
- * mapping and pipeline creation. These are all implemented as coroutines, with most of the tasks
- * being put into a slotmap we use as a global queue for async work - with continuations used to
- * return to the caller once the async work is complete. This works nicely, and allows us to write
- * more of our code in a synchronous style, while still being async under the hood.
- *
- * I also use Session() structs as RAII wrappers to manage lifetimes of things like
- * mapping/unmapping
- */
 namespace velox
 {
 
@@ -48,11 +38,20 @@ namespace detail
 template<typename T>
 using Result = std::expected<T, RhiError>;
 
+// todo: Since everything needs a Scheduler pointer at this point, that should be created by the Future
+// and used with await_transform so that it gets forwarded without us needing to pass it
+// even better: move the Future functions to be Context members so they get it direct from that
+
 struct AdapterAwaitable
 {
     wgpu::Instance instance;
     wgpu::RequestAdapterOptions options;
     Result<wgpu::Adapter> result;
+    Scheduler* scheduler;
+
+    AdapterAwaitable(wgpu::Instance _instance,
+                     wgpu::RequestAdapterOptions _options,
+                     Scheduler* _scheduler) noexcept;
 
     // always suspend
     constexpr bool await_ready() const noexcept
@@ -75,6 +74,11 @@ struct DeviceAwaitable
     wgpu::Adapter adapter;
     wgpu::DeviceDescriptor descriptor;
     Result<wgpu::Device> result;
+    Scheduler* scheduler;
+
+    DeviceAwaitable(wgpu::Adapter _adapter,
+                    wgpu::DeviceDescriptor _descriptor,
+                    Scheduler* _scheduler) noexcept;
 
     constexpr bool await_ready() const noexcept
     {
@@ -145,6 +149,7 @@ template<typename MapType>
 struct MapSession
 {
     using PointerType = std::conditional_t<std::is_same_v<MapReadAwaitable, MapType>, const void*, void*>;
+
 public:
     MapSession(const MapSession&) = delete;
     MapSession& operator=(const MapSession&) = delete;
@@ -184,12 +189,14 @@ public:
         return std::span<const T>(typeArray, typeArray + numElements);
     }
 
-    void* GetDataPtr() noexcept requires(std::is_same_v<MapType, MapWriteAwaitable>)
+    void* GetDataPtr() noexcept
+        requires(std::is_same_v<MapType, MapWriteAwaitable>)
     {
         return mappedPtr;
     }
 
-    const void* GetDataPtr() const noexcept requires(std::is_same_v<MapType, MapReadAwaitable>)
+    const void* GetDataPtr() const noexcept
+        requires(std::is_same_v<MapType, MapReadAwaitable>)
     {
         return mappedPtr;
     }
@@ -220,10 +227,10 @@ public:
     RenderPipelineAwaitable(wgpu::Device _device,
                             wgpu::RenderPipelineDescriptor _descriptor,
                             Scheduler* _scheduler) noexcept;
-    ~RenderPipelineAwaitable() noexcept;
+    ~RenderPipelineAwaitable() noexcept = default;
     RenderPipelineAwaitable(const RenderPipelineAwaitable&) = delete;
     RenderPipelineAwaitable& operator=(const RenderPipelineAwaitable&) = delete;
-    
+
     // todo: in the future, we could probably query a cache here and immediate return already built pipelines!
     // alternatively: hook them up to the same coroutine slot, so they're alerted on wakeup too?
     constexpr bool await_ready() const noexcept
@@ -233,7 +240,6 @@ public:
 
     void await_suspend(std::coroutine_handle<> handle);
     Result<wgpu::RenderPipeline> await_resume() noexcept;
-
 };
 
 struct ComputePipelineAwaitable
@@ -243,11 +249,12 @@ private:
     wgpu::ComputePipelineDescriptor descriptor{};
     Result<wgpu::ComputePipeline> result{};
     Scheduler* scheduler{ nullptr };
+
 public:
     ComputePipelineAwaitable(wgpu::Device _device,
                              wgpu::ComputePipelineDescriptor _descriptor,
                              Scheduler* _scheduler) noexcept;
-    ~ComputePipelineAwaitable() noexcept;
+    ~ComputePipelineAwaitable() noexcept = default;
     ComputePipelineAwaitable(const ComputePipelineAwaitable&) = delete;
     ComputePipelineAwaitable& operator=(const ComputePipelineAwaitable&) = delete;
 
