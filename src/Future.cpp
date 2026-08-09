@@ -4,7 +4,7 @@
 namespace velox
 {
 
-AdapterFuture RequestAdapater(wgpu::Instance _instance,
+AdapterFuture RequestAdapter(wgpu::Instance _instance,
                               wgpu::RequestAdapterOptions _options,
                               Scheduler* _scheduler)
 {
