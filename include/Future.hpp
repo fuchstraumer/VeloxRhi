@@ -2,6 +2,7 @@
 #ifndef VELOX_ASYNC_FUTURE_HPP
 #define VELOX_ASYNC_FUTURE_HPP
 #include "AsyncTasks.hpp"
+#include "CoroutineAllocator.hpp"
 
 namespace velox
 {
@@ -39,6 +40,16 @@ struct Future
             return {};
         }
 
+        static void* operator new(std::size_t size)
+        {
+            return g_CoroutineAllocator.Allocate(size);
+        }
+
+        static void operator delete(void* ptr, std::size_t size)
+        {
+            g_CoroutineAllocator.Deallocate(ptr, size);
+        }
+
         template<typename U>
         void return_value(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>)
         {
@@ -57,8 +68,10 @@ struct Future
 
     std::coroutine_handle<promise_type> handle;
 
-    constexpr Future() noexcept : handle{ nullptr }
-    {}
+    constexpr Future() noexcept
+        : handle{ nullptr }
+    {
+    }
 
     constexpr explicit Future(std::coroutine_handle<promise_type> _handle) noexcept
         : handle{ _handle }
@@ -75,8 +88,16 @@ struct Future
 
     Future(const Future&) = delete;
     Future& operator=(const Future&) = delete;
-    Future(Future&& other) noexcept = default;
-    Future& operator=(Future&& other) noexcept = default;
+    Future(Future&& other) noexcept : handle{ other.handle }
+    {
+        other.handle = nullptr;
+    }
+    Future& operator=(Future&& other) noexcept
+    {
+        handle = other.handle;
+        other.handle = nullptr;
+        return *this;
+    }
 
     // because this now holds the coroutine and promise, this simplifies tremendously
     std::optional<Result<T>> TryGet()
