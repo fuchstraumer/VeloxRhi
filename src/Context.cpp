@@ -225,6 +225,7 @@ Result<wgpu::Instance> Context::requestInstance()
     {
         return std::unexpected(RhiError::InstanceRequestFailed);
     }
+    std::println(stderr, "[velox][context] Instance creation successful.");
     return std::move(instance);
 }
 
@@ -275,7 +276,7 @@ wgpu::RequestAdapterOptions Context::getAdapterOptions() const
 
 Result<Context::BootstrapPhase> Context::bootstrapAdapter()
 {
-    if (!adapterFuture)
+    if (!adapterFuture && !adapter)
     {
         adapterFuture = RequestAdapter(instance, std::move(getAdapterOptions()), scheduler.get());
         phase = BootstrapPhase::RequestingAdapter;
@@ -292,6 +293,7 @@ Result<Context::BootstrapPhase> Context::bootstrapAdapter()
             adapter = std::move(adapterResult->value());
             // advance phase
             phase = BootstrapPhase::RequestingDevice;
+            std::println(stderr, "[velox][context] Adapter creation successful.");
             return phase;
         }
     }
@@ -324,7 +326,7 @@ wgpu::DeviceDescriptor Context::getDeviceDescriptor() const
 
 Result<Context::BootstrapPhase> Context::bootstrapDevice()
 {
-    if (!deviceFuture)
+    if (!deviceFuture && !device)
     {
         deviceFuture = RequestDevice(adapter, std::move(getDeviceDescriptor()), scheduler.get());
         phase = BootstrapPhase::RequestingDevice;
@@ -345,6 +347,7 @@ Result<Context::BootstrapPhase> Context::bootstrapDevice()
             {
                 surface = surfaceResult.value();
                 configureSurface();
+                std::println(stderr, "[velox][context] Device creation successful.");
                 return BootstrapPhase::Complete;
             }
             else
