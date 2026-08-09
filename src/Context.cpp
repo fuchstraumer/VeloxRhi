@@ -91,6 +91,9 @@ Result<Context::BootstrapPhase> Context::RunBootstrap()
     {
     case BootstrapPhase::Invalid:
         return std::unexpected(RhiError::BootstrapInInvalidState);
+    // todo: [again] [srs] : we had to add this bc we crash on start withouth it. make state variant. pls. im so tired
+    case BootstrapPhase::InstanceCreated:
+        [[fallthrough]];
     case BootstrapPhase::RequestingAdapter:
         return bootstrapAdapter();
     case BootstrapPhase::RequestingDevice:

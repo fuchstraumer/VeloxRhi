@@ -59,6 +59,8 @@ class Context
     Context& operator=(const Context&) = delete;
 
 public:
+
+    // todo: Replace this with variants for each phase, which hold data for said stage
     enum class BootstrapPhase : uint8_t
     {
         Invalid = 0,
