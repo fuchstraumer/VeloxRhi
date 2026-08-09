@@ -11,7 +11,8 @@ struct Scheduler;
 /**Brainblast moment: this is what holds the promise type. This is what defines the type of the result, what
  * actually carries some type information, and also what owns the coroutine_handle. Scheduler is not just a
  * big pile of type-erased coroutine handles. This simplifies awaitable dispatching tremendously.
- *
+ * todo: stop_token, stop_source, stop_callback etc: need to cancel pending coroutines on device loss or quit
+ * this will be important for shipping to clients without grenading their browser tab state etc
  */
 template<typename T>
 struct Future
