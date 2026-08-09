@@ -8,6 +8,8 @@ NamespaceIndentation: Inner # only indent for things like detail::
 IndentAccessModifiers: false
 AccessModifierOffset: -4
 ColumnLimit: 110
+BreakBeforeReturnType: None
+PenaltyReturnTypeOnItsOwnLine: 1000000
 
 AllowShortBlocksOnASingleLine: Never
 AllowShortFunctionsOnASingleLine: None

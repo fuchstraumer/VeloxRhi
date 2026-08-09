@@ -7,11 +7,11 @@ Checks: >
     performance-*,
     modernize-*,
     cppcoreguidelines-*,
-    readability-identifier-naming
+    readability-identifier-naming,
     misc-include-cleaner
 
 WarningsAsErrors: ''
-HeaderFilterRegex: '^(src|include)/.*'
+HeaderFilterRegex: '.*(src|include)/.*'
 AnalyzeTemporaryDtors: false
 
 CheckOptions:
