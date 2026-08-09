@@ -30,34 +30,35 @@ void AdapterAwaitable::await_suspend(std::coroutine_handle<> handle)
         slotHandle = scheduler->Enqueue(handle);
     }
 
-    instance.RequestAdapter(
-        &options,
-        wgpu::CallbackMode::AllowSpontaneous,
-        [this, handle, &slotHandle](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
-        {
-            if (status != wgpu::RequestAdapterStatus::Success)
-            {
-                detail::PrintStatusMessage("RequestAdapter", status, message);
-                result = std::unexpected(velox::RhiError::AdapterRequestFailed);
-            }
-            else [[likely]]
-            {
-                result = adapter;
-            }
+    instance.RequestAdapter(&options,
+                            wgpu::CallbackMode::AllowSpontaneous,
+                            [this, handle, &slotHandle](wgpu::RequestAdapterStatus status,
+                                                        wgpu::Adapter adapter,
+                                                        wgpu::StringView message)
+                            {
+                                if (status != wgpu::RequestAdapterStatus::Success)
+                                {
+                                    detail::PrintStatusMessage("RequestAdapter", status, message);
+                                    result = std::unexpected(velox::RhiError::AdapterRequestFailed);
+                                }
+                                else [[likely]]
+                                {
+                                    result = adapter;
+                                }
 
-            if (!scheduler) [[unlikely]]
-            {
-                handle.resume();
-            }
-            else
-            {
-                RhiError error = scheduler->MarkReady(slotHandle);
-                if (error != RhiError::Success) [[unlikely]]
-                {
-                    result = std::unexpected(error);
-                }
-            }
-        });
+                                if (!scheduler) [[unlikely]]
+                                {
+                                    handle.resume();
+                                }
+                                else
+                                {
+                                    RhiError error = scheduler->MarkReady(slotHandle);
+                                    if (error != RhiError::Success) [[unlikely]]
+                                    {
+                                        result = std::unexpected(error);
+                                    }
+                                }
+                            });
 }
 
 Result<wgpu::Adapter> AdapterAwaitable::await_resume() noexcept
@@ -82,34 +83,34 @@ void DeviceAwaitable::await_suspend(std::coroutine_handle<> handle)
         slotHandle = scheduler->Enqueue(handle);
     }
 
-    adapter.RequestDevice(
-        &descriptor,
-        wgpu::CallbackMode::AllowSpontaneous,
-        [this, &handle, &slotHandle](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message)
-        {
-            if (status != wgpu::RequestDeviceStatus::Success)
-            {
-                detail::PrintStatusMessage("RequestDevice", status, message);
-                result = std::unexpected(velox::RhiError::DeviceRequestFailed);
-            }
-            else [[likely]]
-            {
-                result = device;
-            }
+    adapter.RequestDevice(&descriptor,
+                          wgpu::CallbackMode::AllowSpontaneous,
+                          [this, &handle, &slotHandle](
+                              wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message)
+                          {
+                              if (status != wgpu::RequestDeviceStatus::Success)
+                              {
+                                  detail::PrintStatusMessage("RequestDevice", status, message);
+                                  result = std::unexpected(velox::RhiError::DeviceRequestFailed);
+                              }
+                              else [[likely]]
+                              {
+                                  result = device;
+                              }
 
-            if (!scheduler) [[unlikely]]
-            {
-                handle.resume();
-            }
-            else
-            {
-                RhiError error = scheduler->MarkReady(slotHandle);
-                if (error != RhiError::Success) [[unlikely]]
-                {
-                    result = std::unexpected(error);
-                }
-            }
-        });
+                              if (!scheduler) [[unlikely]]
+                              {
+                                  handle.resume();
+                              }
+                              else
+                              {
+                                  RhiError error = scheduler->MarkReady(slotHandle);
+                                  if (error != RhiError::Success) [[unlikely]]
+                                  {
+                                      result = std::unexpected(error);
+                                  }
+                              }
+                          });
 }
 
 Result<wgpu::Device> DeviceAwaitable::await_resume() noexcept
@@ -294,6 +295,15 @@ void RenderPipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
 Result<wgpu::RenderPipeline> RenderPipelineAwaitable::await_resume() noexcept
 {
     return std::move(result);
+}
+
+ComputePipelineAwaitable::ComputePipelineAwaitable(wgpu::Device _device,
+                                                   wgpu::ComputePipelineDescriptor _descriptor,
+                                                   Scheduler* _scheduler) noexcept
+    : device{ _device },
+      descriptor{ std::forward<wgpu::ComputePipelineDescriptor>(_descriptor) },
+      scheduler{ _scheduler }
+{
 }
 
 void ComputePipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
