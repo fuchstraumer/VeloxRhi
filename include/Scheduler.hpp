@@ -12,7 +12,7 @@ namespace velox
 // for tagging / our boolean ready checks, and size "dynamically" for the platforms pointer width.
 struct TaggedCoroutineSlot
 {
-private: // in hindsight this is really a class lol
+private:
     uintptr_t data{ 0u };
     static constexpr uintptr_t k_readyBit = 1ULL;
     static constexpr uintptr_t k_ptrMask = ~k_readyBit;
@@ -21,12 +21,12 @@ public:
     ~TaggedCoroutineSlot() noexcept = default;
     TaggedCoroutineSlot(const TaggedCoroutineSlot&) = delete;
     TaggedCoroutineSlot& operator=(const TaggedCoroutineSlot&) = delete;
-    TaggedCoroutineSlot(TaggedCoroutineSlot&&) noexcept = default;
-    TaggedCoroutineSlot& operator=(TaggedCoroutineSlot&&) noexcept = default;
+    TaggedCoroutineSlot(TaggedCoroutineSlot&&) noexcept;
+    TaggedCoroutineSlot& operator=(TaggedCoroutineSlot&&) noexcept;
     void SetHandle(std::coroutine_handle<> handle) noexcept;
-    void SetReady(bool ready) noexcept;
-    bool IsReady() const noexcept;
-    std::coroutine_handle<> GetHandle() const noexcept;
+    // we need to take handle on desktop cmpexchg against stored handle, to make sure it hasn't swapped underneath us
+    bool SetReady([[maybe_unused]] std::coroutine_handle<> handle) noexcept;
+    std::coroutine_handle<> GetHandleIfReady() const noexcept;
 };
 
 // todo: Eventually we will want continuations, sort them so continuation series' are memory adjacent then
@@ -39,7 +39,7 @@ struct Scheduler
     Scheduler(Scheduler&&) noexcept = default;
     Scheduler& operator=(Scheduler&&) noexcept = default;
     SlotHandle Enqueue(std::coroutine_handle<> handle) noexcept;
-    RhiError MarkReady(SlotHandle handle) noexcept;
+    RhiError MarkReady(SlotHandle mapHandle, std::coroutine_handle<> coroHandle) noexcept;
     void Tick();
 
 private:

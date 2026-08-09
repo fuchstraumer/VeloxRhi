@@ -1,6 +1,11 @@
 #include "Scheduler.hpp"
 #include <cassert>
 #include <stdexcept>
+#ifndef __EMSCRIPTEN__
+// use std::atomic_ref on desktop to handle async threads (dx12/vk pipeline creation workers)
+// using the ref keeps us scoped to just where we need atomicity and doesn't break SlotMap constraints
+#include <atomic>
+#endif
 
 namespace velox
 {
@@ -11,34 +16,64 @@ TaggedCoroutineSlot::TaggedCoroutineSlot(std::coroutine_handle<> handle) noexcep
     assert((data & k_readyBit) == 0 && "Coroutine handle not aligned as expected");
 }
 
+TaggedCoroutineSlot::TaggedCoroutineSlot(TaggedCoroutineSlot&& other) noexcept : data{ other.data }
+{
+    other.data = 0;
+}
+
+TaggedCoroutineSlot& TaggedCoroutineSlot::operator=(TaggedCoroutineSlot&& other) noexcept
+{
+    if (this != &other)
+    {
+        data = other.data;
+        other.data = uintptr_t(0);
+    }
+    return *this;
+}
+
 void TaggedCoroutineSlot::SetHandle(std::coroutine_handle<> handle) noexcept
 {
     uintptr_t ptrValue = reinterpret_cast<uintptr_t>(handle.address());
     assert((ptrValue & k_readyBit == 0) && "Coroutine handle not aligned correctly");
+#ifndef __EMSCRIPTEN__
+    std::atomic_ref<uintptr_t> dataAtomic{ data };
+    dataAtomic.store(ptrValue, std::memory_order::release);
+#else
     data = ptrValue;
+#endif
 }
 
-void TaggedCoroutineSlot::SetReady(bool ready) noexcept
+bool TaggedCoroutineSlot::SetReady(std::coroutine_handle<> handle) noexcept
 {
-    if (ready)
+#ifndef __EMSCRIPTEN__
+    // need to cmpexchg to make sure whole handle didn't change underneath us
+    // we expect to find this address, unchanged yet, and want to set the ready bit
+    uintptr_t expected = reinterpret_cast<uintptr_t>(handle.address());
+    uintptr_t desired = expected | k_readyBit;
+    std::atomic_ref<uintptr_t> dataAtomic{ data };
+    return dataAtomic.compare_exchange_strong(expected, desired, std::memory_order_release);
+#else
+    data |= k_readyBit;
+    return true;
+#endif
+}
+
+std::coroutine_handle<> TaggedCoroutineSlot::GetHandleIfReady() const noexcept
+{
+#ifndef __EMSCRIPTEN__
+    std::atomic_ref<const uintptr_t> dataAtomic{ data };
+    uintptr_t value = dataAtomic.load(std::memory_order_acquire);
+#else
+    uintptr_t value = data;
+#endif
+    if (value & k_readyBit)
     {
-        data |= k_readyBit;
+        return std::coroutine_handle<>::from_address(reinterpret_cast<void*>(value & k_ptrMask));
     }
     else
     {
-        data &= k_ptrMask;
+        return nullptr;
     }
-}
-
-bool TaggedCoroutineSlot::IsReady() const noexcept
-{
-    return (data & k_readyBit) != 0;
-}
-
-std::coroutine_handle<> TaggedCoroutineSlot::GetHandle() const noexcept
-{
-    void* coroPtr = reinterpret_cast<void*>(data & k_ptrMask);
-    return std::coroutine_handle<>::from_address(coroPtr);
 }
 
 Scheduler::Scheduler()
@@ -57,26 +92,24 @@ SlotHandle Scheduler::Enqueue(std::coroutine_handle<> handle) noexcept
     return slotMap.Emplace(handle);
 }
 
-RhiError Scheduler::MarkReady(SlotHandle handle) noexcept
+RhiError Scheduler::MarkReady(SlotHandle mapHandle, std::coroutine_handle<> coroHandle) noexcept
 {
-    if (!slotMap.Contains(handle))
+    if (!slotMap.Contains(mapHandle))
     {
         return RhiError::AsyncSchedulerMarkReadyFailed;
     }
-    TaggedCoroutineSlot& slot = slotMap[handle];
-    slot.SetReady(true);
-    return RhiError::Success;
+    TaggedCoroutineSlot& slot = slotMap[mapHandle];
+    return slot.SetReady(coroHandle) ? RhiError::Success : RhiError::AsyncSchedulerMarkReadyFailed;
 }
 
 void Scheduler::Tick()
 {
     // use this lambda as the predicate for EraseIf: if the value is ready, we resume it *then* return
     // true in the predicate (so it can be erased. easy!)
-    auto erasePredicate = [](TaggedCoroutineSlot& slot)->bool
+    auto erasePredicate = [](TaggedCoroutineSlot& slot) -> bool
     {
-        if (slot.IsReady())
+        if (std::coroutine_handle<> coro = slot.GetHandleIfReady())
         {
-            std::coroutine_handle<> coro = slot.GetHandle();
             coro.resume();
             return true;
         }

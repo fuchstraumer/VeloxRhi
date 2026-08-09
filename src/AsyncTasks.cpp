@@ -22,17 +22,17 @@ AdapterAwaitable::AdapterAwaitable(wgpu::Instance _instance,
 {
 }
 
-void AdapterAwaitable::await_suspend(std::coroutine_handle<> handle)
+void AdapterAwaitable::await_suspend(std::coroutine_handle<> coro_handle)
 {
     SlotHandle slotHandle;
     if (scheduler)
     {
-        slotHandle = scheduler->Enqueue(handle);
+        slotHandle = scheduler->Enqueue(coro_handle);
     }
 
     instance.RequestAdapter(&options,
                             wgpu::CallbackMode::AllowSpontaneous,
-                            [this, handle, &slotHandle](wgpu::RequestAdapterStatus status,
+                            [this, slotHandle, coro_handle](wgpu::RequestAdapterStatus status,
                                                         wgpu::Adapter adapter,
                                                         wgpu::StringView message)
                             {
@@ -48,11 +48,11 @@ void AdapterAwaitable::await_suspend(std::coroutine_handle<> handle)
 
                                 if (!scheduler) [[unlikely]]
                                 {
-                                    handle.resume();
+                                    coro_handle.resume();
                                 }
                                 else
                                 {
-                                    RhiError error = scheduler->MarkReady(slotHandle);
+                                    RhiError error = scheduler->MarkReady(slotHandle, coro_handle);
                                     if (error != RhiError::Success) [[unlikely]]
                                     {
                                         result = std::unexpected(error);
@@ -75,17 +75,17 @@ DeviceAwaitable::DeviceAwaitable(wgpu::Adapter _adapter,
 {
 }
 
-void DeviceAwaitable::await_suspend(std::coroutine_handle<> handle)
+void DeviceAwaitable::await_suspend(std::coroutine_handle<> coro_handle)
 {
     SlotHandle slotHandle;
     if (scheduler)
     {
-        slotHandle = scheduler->Enqueue(handle);
+        slotHandle = scheduler->Enqueue(coro_handle);
     }
 
     adapter.RequestDevice(&descriptor,
                           wgpu::CallbackMode::AllowSpontaneous,
-                          [this, &handle, &slotHandle](
+                          [this, slotHandle, coro_handle](
                               wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message)
                           {
                               if (status != wgpu::RequestDeviceStatus::Success)
@@ -100,11 +100,11 @@ void DeviceAwaitable::await_suspend(std::coroutine_handle<> handle)
 
                               if (!scheduler) [[unlikely]]
                               {
-                                  handle.resume();
+                                  coro_handle.resume();
                               }
                               else
                               {
-                                  RhiError error = scheduler->MarkReady(slotHandle);
+                                  RhiError error = scheduler->MarkReady(slotHandle, coro_handle);
                                   if (error != RhiError::Success) [[unlikely]]
                                   {
                                       result = std::unexpected(error);
@@ -129,19 +129,19 @@ MapReadAwaitable::MapReadAwaitable(wgpu::Buffer _buffer,
 {
 }
 
-void MapReadAwaitable::await_suspend(std::coroutine_handle<> handle)
+void MapReadAwaitable::await_suspend(std::coroutine_handle<> coro_handle)
 {
-    SlotHandle slot;
+    SlotHandle slotHandle;
     if (scheduler)
     {
-        slot = scheduler->Enqueue(handle);
+        slotHandle = scheduler->Enqueue(coro_handle);
     }
 
     buffer.MapAsync(wgpu::MapMode::Read,
                     offset,
                     size,
                     wgpu::CallbackMode::AllowSpontaneous,
-                    [handle, &slot, this](wgpu::MapAsyncStatus status, wgpu::StringView message)
+                    [this, slotHandle, coro_handle](wgpu::MapAsyncStatus status, wgpu::StringView message)
                     {
                         if (status != wgpu::MapAsyncStatus::Success)
                         {
@@ -151,11 +151,11 @@ void MapReadAwaitable::await_suspend(std::coroutine_handle<> handle)
 
                         if (!scheduler)
                         {
-                            handle.resume();
+                            coro_handle.resume();
                         }
                         else
                         {
-                            RhiError error = scheduler->MarkReady(slot);
+                            RhiError error = scheduler->MarkReady(slotHandle, coro_handle);
                             if (error != RhiError::Success) [[unlikely]]
                             {
                                 result = std::unexpected(error);
@@ -187,23 +187,23 @@ MapWriteAwaitable::MapWriteAwaitable(wgpu::Buffer _buffer,
 {
 }
 
-void MapWriteAwaitable::await_suspend(std::coroutine_handle<> handle)
+void MapWriteAwaitable::await_suspend(std::coroutine_handle<> coro_handle)
 {
     // await suspend registers the callback, meaning we immediately return to the caller
     // webgpu will call this captured callback, at which point it resumes the coroutine
 
     // this is a deferred resume coroutine, register with context
-    SlotHandle slot;
+    SlotHandle slotHandle;
     if (scheduler)
     {
-        slot = scheduler->Enqueue(handle);
+        slotHandle = scheduler->Enqueue(coro_handle);
     }
 
     buffer.MapAsync(wgpu::MapMode::Write,
                     offset,
                     size,
                     wgpu::CallbackMode::AllowSpontaneous,
-                    [handle, &slot, this](wgpu::MapAsyncStatus status, wgpu::StringView message)
+                    [this, slotHandle, coro_handle](wgpu::MapAsyncStatus status, wgpu::StringView message)
                     {
                         if (status != wgpu::MapAsyncStatus::Success)
                         {
@@ -213,11 +213,11 @@ void MapWriteAwaitable::await_suspend(std::coroutine_handle<> handle)
 
                         if (!scheduler)
                         {
-                            handle.resume();
+                            coro_handle.resume();
                         }
                         else
                         {
-                            RhiError error = scheduler->MarkReady(slot);
+                            RhiError error = scheduler->MarkReady(slotHandle, coro_handle);
                             if (error != RhiError::Success) [[unlikely]]
                             {
                                 result = std::unexpected(error);
@@ -247,24 +247,18 @@ RenderPipelineAwaitable::RenderPipelineAwaitable(wgpu::Device _device,
 {
 }
 
-void RenderPipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
+void RenderPipelineAwaitable::await_suspend(std::coroutine_handle<> coro_handle)
 {
-    std::expected<SlotHandle, RhiError> slot;
+    SlotHandle slotHandle;
     if (scheduler)
     {
-        slot = scheduler->Enqueue(handle);
-        if (!slot.has_value()) [[unlikely]]
-        {
-            // propagate error up and out immediately
-            result = std::unexpected(slot.error());
-            handle.resume();
-        }
+        slotHandle = scheduler->Enqueue(coro_handle);
     }
 
     device.CreateRenderPipelineAsync(
         &descriptor,
         wgpu::CallbackMode::AllowSpontaneous,
-        [handle, &slot, this](
+        [this, slotHandle, coro_handle](
             wgpu::CreatePipelineAsyncStatus status, wgpu::RenderPipeline pipeline, wgpu::StringView message)
         {
             if (status != wgpu::CreatePipelineAsyncStatus::Success)
@@ -279,7 +273,7 @@ void RenderPipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
 
             if (scheduler)
             {
-                RhiError error = scheduler->MarkReady(slot.value());
+                RhiError error = scheduler->MarkReady(slotHandle, coro_handle);
                 if (error != RhiError::Success) [[unlikely]]
                 {
                     result = std::unexpected(error);
@@ -287,7 +281,7 @@ void RenderPipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
             }
             else
             {
-                handle.resume();
+                coro_handle.resume();
             }
         });
 }
@@ -306,24 +300,18 @@ ComputePipelineAwaitable::ComputePipelineAwaitable(wgpu::Device _device,
 {
 }
 
-void ComputePipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
+void ComputePipelineAwaitable::await_suspend(std::coroutine_handle<> coro_handle)
 {
-    std::expected<SlotHandle, RhiError> slot;
+    SlotHandle slotHandle;
     if (scheduler)
     {
-        slot = scheduler->Enqueue(handle);
-        if (!slot.has_value()) [[unlikely]]
-        {
-            // propagate error up and out immediately
-            result = std::unexpected(slot.error());
-            handle.resume();
-        }
+        slotHandle = scheduler->Enqueue(coro_handle);
     }
 
     device.CreateComputePipelineAsync(
         &descriptor,
         wgpu::CallbackMode::AllowSpontaneous,
-        [handle, slot, this](
+        [this, slotHandle, coro_handle](
             wgpu::CreatePipelineAsyncStatus status, wgpu::ComputePipeline pipeline, wgpu::StringView message)
         {
             if (status != wgpu::CreatePipelineAsyncStatus::Success)
@@ -338,7 +326,7 @@ void ComputePipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
 
             if (scheduler)
             {
-                RhiError error = scheduler->MarkReady(slot.value());
+                RhiError error = scheduler->MarkReady(slotHandle, coro_handle);
                 if (error != RhiError::Success) [[unlikely]]
                 {
                     result = std::unexpected(error);
@@ -346,7 +334,7 @@ void ComputePipelineAwaitable::await_suspend(std::coroutine_handle<> handle)
             }
             else
             {
-                handle.resume();
+                coro_handle.resume();
             }
         });
 }
