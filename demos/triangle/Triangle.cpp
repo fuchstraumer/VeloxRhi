@@ -11,8 +11,38 @@
 #endif
 #include "TestShader.hpp"
 #include <print>
+#include <vector>
 
 using namespace velox;
+
+static const std::vector<float> vertexData
+{
+    0.0f, 0.5f, 1.0f, 0.0f, 0.0f,
+   -0.5f,-0.5f, 0.0f, 1.0f, 0.0f,
+    0.5f,-0.5f, 0.0f, 0.0f, 1.0f
+};
+
+static const float vertexPositions[]
+{
+    -0.5f, -0.5f,
+     0.5f, -0.5f,
+     0.0f,  0.0f,
+    -0.55f,-0.5f,
+    -0.05f, 0.5f,
+    -0.55f, 0.5f
+};
+
+static const float vertexColors[]
+{
+    1.0f, 0.0f, 0.0f,
+    0.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 1.0f,
+    1.0f, 1.0f, 0.0f,
+    1.0f, 0.0f, 1.0f,
+    0.0f, 1.0f, 1.0f
+};
+
+inline constexpr bool k_UseSplitVBOs = true;
 
 class TriangleApplication final : public Application
 {
@@ -36,16 +66,117 @@ public:
             }
         }
 
+        if constexpr (k_UseSplitVBOs)
+        {
+            if (!vertexBuffer && !vertexColorBuffer)
+            {
+                wgpu::BufferDescriptor vPosDescr{};
+                vPosDescr.label = "VertexPositions";
+                vPosDescr.mappedAtCreation = false;
+                vPosDescr.size = sizeof(vertexPositions);
+                vPosDescr.usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst;
+                wgpu::Device dvc = GetContext().GetDevice();
+                vertexBuffer = dvc.CreateBuffer(&vPosDescr);
+                if (!vertexBuffer)
+                {
+                    return std::unexpected(RhiError::BufferMapFailed);
+                }
+                wgpu::BufferDescriptor vColDescr{};
+                vColDescr.label = "VertexColors";
+                vColDescr.mappedAtCreation = false;
+                vColDescr.size = sizeof(vertexColors);
+                vColDescr.usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst;
+                vertexColorBuffer = dvc.CreateBuffer(&vColDescr);
+                if (!vertexColorBuffer)
+                {
+                    return std::unexpected(RhiError::BufferMapFailed);
+                }
+                // now copy the data into the buffers
+                wgpu::Queue queue = dvc.GetQueue();
+                queue.WriteBuffer(vertexBuffer, 0, vertexPositions, sizeof(vertexPositions));
+                queue.WriteBuffer(vertexColorBuffer, 0, vertexColors, sizeof(vertexColors));
+            }
+        }
+        else
+        {
+            if (!vertexBuffer)
+            {
+                wgpu::BufferDescriptor vboDescr{};
+                vboDescr.label = "VBO";
+                vboDescr.mappedAtCreation = false;
+                vboDescr.size = sizeof(float) * vertexData.size();
+                vboDescr.usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst;
+                wgpu::Device dvc = GetContext().GetDevice();
+                vertexBuffer = dvc.CreateBuffer(&vboDescr);
+                if (!vertexBuffer)
+                {
+                    return std::unexpected(RhiError::BufferMapFailed);
+                }
+                wgpu::Queue queue = dvc.GetQueue();
+                queue.WriteBuffer(vertexBuffer, 0, vertexData.data(), vboDescr.size);
+            }
+        }
+
         // undispatched. dispatch future and populate 
         if (!pipelineFuture && !pipeline)
         {
             ColorTargetState colorTarget{};
             colorTarget.format = GetContext().GetSurfaceFormat();
+            // because this is taken as a pointer by pipeline, it needs to stay alive at the top
+            // level of this function, and we'll jsut set count based on k_UseSplitVBOs
+            VertexAttribute vboAttributes[2]{ VertexAttribute{}, VertexAttribute{} };
+            VertexBufferLayout vboLayout[2]{ VertexBufferLayout{}, VertexBufferLayout{} };
+            if constexpr (k_UseSplitVBOs)
+            {
+                vboAttributes[0].format = wgpu::VertexFormat::Float32x2;
+                vboAttributes[0].offset = 0;
+                vboAttributes[0].shaderLocation = 0;
+                
+                vboAttributes[1].format = wgpu::VertexFormat::Float32x3;
+                vboAttributes[1].offset = 0;
+                vboAttributes[1].shaderLocation = 1;
+                
+                vboLayout[0].arrayStride = sizeof(float) * 2;
+                vboLayout[0].stepMode = wgpu::VertexStepMode::Vertex;
+                vboLayout[0].attributeCount = 1;
+                vboLayout[0].attributes = &vboAttributes[0];
 
+                vboLayout[1].arrayStride = sizeof(float) * 3;
+                vboLayout[1].stepMode = wgpu::VertexStepMode::Vertex;
+                vboLayout[1].attributeCount = 1;
+                vboLayout[1].attributes = &vboAttributes[1];
+
+                vertexCount = static_cast<uint32_t>(std::size(vertexPositions)) / 2; // two floats per vertex
+            }
+            else
+            {
+                vboAttributes[0].format = wgpu::VertexFormat::Float32x2;
+                vboAttributes[0].offset = 0;
+                vboAttributes[0].shaderLocation = 0;
+                
+                vboAttributes[1].format = wgpu::VertexFormat::Float32x3;
+                vboAttributes[1].offset = sizeof(float) * 2;
+                vboAttributes[1].shaderLocation = 1;
+
+                vboLayout[0].arrayStride = sizeof(float) * 5;
+                vertexCount = static_cast<uint32_t>(vertexData.size() * sizeof(float)) / static_cast<uint32_t>(vboLayout[0].arrayStride);
+                vboLayout[0].stepMode = wgpu::VertexStepMode::Vertex;
+                vboLayout[0].attributeCount = std::size(vboAttributes);
+                vboLayout[0].attributes = vboAttributes;
+            }
+            
             VertexState vertexState{};
             vertexState.module = shaderModule;
-            vertexState.bufferCount = 0;
-            vertexState.buffers = nullptr;
+            if constexpr (k_UseSplitVBOs)
+            {
+                vertexState.bufferCount = 2;
+            }
+            else
+            {
+                vertexState.bufferCount = 1;
+            }
+
+            vertexState.buffers = &vboLayout[0];
             vertexState.entryPoint = "VsMain";
 
             PrimitiveState primitiveState{};
@@ -111,7 +242,16 @@ public:
         wgpu::CommandEncoder encoder = context.GetDevice().CreateCommandEncoder();
         wgpu::RenderPassEncoder renderPass = encoder.BeginRenderPass(&renderPassDesc);
         renderPass.SetPipeline(pipeline);
-        renderPass.Draw(3);
+        if constexpr (k_UseSplitVBOs)
+        {
+            renderPass.SetVertexBuffer(0, vertexBuffer, 0, vertexBuffer.GetSize());
+            renderPass.SetVertexBuffer(1, vertexColorBuffer, 0, vertexColorBuffer.GetSize());
+        }
+        else
+        {
+            renderPass.SetVertexBuffer(0, vertexBuffer, 0, vertexBuffer.GetSize());
+        }
+        renderPass.Draw(vertexCount, 1, 0, 0);
         renderPass.End();
 
         wgpu::CommandBuffer commandBuffer = encoder.Finish();
@@ -120,9 +260,14 @@ public:
     }
 
 private:
+    uint32_t vertexCount;
+    wgpu::Buffer vertexBuffer;
+    wgpu::Buffer vertexColorBuffer;
+    wgpu::Buffer indexBuffer;
     wgpu::ShaderModule shaderModule;
     wgpu::RenderPipeline pipeline;
     RenderPipelineFuture pipelineFuture;
+    MapWriteFuture mapWriteFuture;
 };
 
 

@@ -29,11 +29,11 @@ function(add_velox_rhi_demo NAME)
             "-sEXIT_RUNTIME=1"
             "-sNO_FILESYSTEM=1"
             "-sWASM=1"
-            "-sUSE_WEBGPU=1"
             "-sALLOW_MEMORY_GROWTH=1"
             "-sMALLOC=emmalloc"
             "-sUSE_GLFW=3"
-            "-flto")
+            "-flto"
+            "-sUSE_CLOSURE_COMPILER=1")
 
         if (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
             target_compile_options(${NAME} PRIVATE -g3 -O0)
@@ -44,6 +44,11 @@ function(add_velox_rhi_demo NAME)
             target_link_options(${NAME} PRIVATE -O3)
         endif()
 
+        set_target_properties(${NAME} PROPERTIES SUFFIX ".html")
+    endif()
+
+    if (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
+        target_compile_definitions(${NAME} PUBLIC VELOX_ENABLE_DIAGNOSTICS)
     endif()
 
     if (NOT EMSCRIPTEN)
