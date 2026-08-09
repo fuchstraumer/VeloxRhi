@@ -51,17 +51,10 @@ Scheduler::~Scheduler()
     assert(slotMap.Empty());
 }
 
-std::expected<SlotHandle, RhiError> Scheduler::Enqueue(std::coroutine_handle<> handle)
+SlotHandle Scheduler::Enqueue(std::coroutine_handle<> handle) noexcept
 {
-    SlotHandle result = slotMap.Emplace(handle);
-    if (result.IsValid()) [[likely]]
-    {
-        return result;
-    }
-    else
-    {
-        return std::unexpected(RhiError::AsyncSchedulerEnqueueFailed);
-    }
+    assert(!slotMap.Full() && "SlotMap at capacity, too many coroutines emplaced without clearing!");
+    return slotMap.Emplace(handle);
 }
 
 RhiError Scheduler::MarkReady(SlotHandle handle) noexcept

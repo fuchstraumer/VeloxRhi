@@ -38,12 +38,12 @@ struct Scheduler
     Scheduler& operator=(const Scheduler&) = delete;
     Scheduler(Scheduler&&) noexcept = default;
     Scheduler& operator=(Scheduler&&) noexcept = default;
-    std::expected<SlotHandle, RhiError> Enqueue(std::coroutine_handle<> handle);
+    SlotHandle Enqueue(std::coroutine_handle<> handle) noexcept;
     RhiError MarkReady(SlotHandle handle) noexcept;
     void Tick();
 
 private:
-    SlotMap<TaggedCoroutineSlot, 512> slotMap;
+    SlotMap<TaggedCoroutineSlot, 2048> slotMap;
 };
 
 } // namespace velox
