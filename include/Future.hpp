@@ -92,6 +92,11 @@ struct Future
         handle = nullptr;
         return value;
     }
+
+    constexpr explicit operator bool() const noexcept
+    {
+        return handle != nullptr;
+    }
 };
 
 using AdapterFuture = Future<wgpu::Adapter>;

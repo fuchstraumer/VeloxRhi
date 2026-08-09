@@ -34,6 +34,7 @@ enum class RhiError : uint64_t
     SurfacePresentFailed = 16,
     BufferMapFailed = 17,
     PipelineCreationFailed = 18,
+    BootstrapInInvalidState = 19,
     // Start async function specific error codes (as needed)
     AsyncCallbackCanceled = 50,
     AsyncBufferMapAborted = 55,

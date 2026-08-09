@@ -1,15 +1,13 @@
 #include "Context.hpp"
 #include "AsyncTasks.hpp"
 #include "Scheduler.hpp"
-#include "magic_enum/magic_enum.hpp"
 #include <algorithm>
-#include <coroutine>
+#include <magic_enum/magic_enum.hpp>
 #include <print>
+#include <stdexcept>
 #include <webgpu/webgpu_glfw.h>
-
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-
 // sorry for this doing inline but I want to get it done and over with
 #if !defined(__EMSCRIPTEN__) && defined(_WIN32)
 #undef APIENTRY // glfw also defines this, need to undef to compile
@@ -35,9 +33,6 @@ std::string GetSystemDirectory()
     return strResult;
 }
 #endif
-
-// true = asyncify IS on, false = it is not, we're doing the async ourselves
-constexpr static bool k_Asyncify = false;
 
 namespace
 {
@@ -83,59 +78,31 @@ Context::Context(ContextCreateInfo _createInfo)
     phase = BootstrapPhase::InstanceCreated;
 }
 
-/*
-Task<std::expected<bool, RhiError>> Context::InitWebGPU(const ContextCreateInfo& createInfo)
-{
-    if (k_Asyncify)
-    {
-        wgpu::RequestAdapterOptions options = getAdapterOptions(createInfo);
-        auto adapterResult = co_await AdapterAwaitable{ instance, options };
-        if (!adapterResult)
-        {
-            co_return std::unexpected(adapterResult.error());
-        }
-
-        adapter = std::move(adapterResult.value());
-
-        wgpu::DeviceDescriptor deviceDesc = getDeviceDescriptor(createInfo);
-        auto deviceResult = co_await DeviceAwaitable{ adapter, deviceDesc };
-        if (!deviceResult)
-        {
-            co_return std::unexpected(deviceResult.error());
-        }
-
-        device = std::move(deviceResult.value());
-        queue = device.GetQueue();
-        surface = ValidOrExit(createSurface(createInfo));
-        configureSurface(createInfo);
-        std::println(stderr, "[velox][context] Instance, Adapter, and Device online");
-        co_return true;
-    }
-    else
-    {
-        adapter = ValidOrExit(requestAdapter(createInfo));
-        device = ValidOrExit(requestDevice(createInfo));
-        queue = device.GetQueue();
-        std::println(stderr, "[velox][context] Instance, Adapter, and Device online");
-        std::string enabledFeatureNames;
-        for (const auto& feature : createInfo.RequiredFeatures)
-        {
-            enabledFeatureNames += std::format(" {} |", magic_enum::enum_name(feature));
-        }
-        std::println(stderr, "[velox][context] Device enabled features:{}", enabledFeatureNames);
-        surface = ValidOrExit(createSurface(createInfo));
-        configureSurface(createInfo);
-        // in un-async mode, we can just co_return true to immediately finish the coroutine, as all
-        // work is done synchronously
-        co_return true;
-    }
-}
-*/
-
 Context::~Context()
 {
     glfwDestroyWindow(nativeWindow);
     glfwTerminate();
+}
+
+Result<Context::BootstrapPhase> Context::RunBootstrap()
+{
+    assert(phase > BootstrapPhase::Invalid && "RunBootstrap called before Instance creation completed");
+    switch (phase)
+    {
+    case BootstrapPhase::Invalid:
+        return std::unexpected(RhiError::BootstrapInInvalidState);
+    case BootstrapPhase::RequestingAdapter:
+        return bootstrapAdapter();
+    case BootstrapPhase::RequestingDevice:
+        return bootstrapDevice();
+    case BootstrapPhase::Complete:
+        std::println(stderr, "Context Bootstrap process completed. But how did you get here?");
+        return BootstrapPhase::Complete;
+    default:
+        return std::unexpected(RhiError::BootstrapInInvalidState);
+    }
+
+    return phase;
 }
 
 ResizeStatus Context::Resize(uint32_t width, uint32_t height)
@@ -303,6 +270,33 @@ wgpu::RequestAdapterOptions Context::getAdapterOptions() const
     return options;
 }
 
+Result<Context::BootstrapPhase> Context::bootstrapAdapter()
+{
+    if (!adapterFuture)
+    {
+        adapterFuture = RequestAdapter(instance, std::move(getAdapterOptions()), scheduler.get());
+        phase = BootstrapPhase::RequestingAdapter;
+    }
+
+    if (auto adapterResult = adapterFuture.TryGet())
+    {
+        if (!adapterResult->has_value()) [[unlikely]]
+        {
+            return std::unexpected(adapterResult->error());
+        }
+        else
+        {
+            adapter = std::move(adapterResult->value());
+            // advance phase
+            phase = BootstrapPhase::RequestingDevice;
+        }
+    }
+    else
+    {
+        return BootstrapPhase::RequestingAdapter;
+    }
+}
+
 wgpu::DeviceDescriptor Context::getDeviceDescriptor() const
 {
     wgpu::DeviceDescriptor deviceDesc{};
@@ -322,18 +316,54 @@ wgpu::DeviceDescriptor Context::getDeviceDescriptor() const
     return deviceDesc;
 }
 
+Result<Context::BootstrapPhase> Context::bootstrapDevice()
+{
+    if (!deviceFuture)
+    {
+        deviceFuture = RequestDevice(adapter, std::move(getDeviceDescriptor()), scheduler.get());
+        phase = BootstrapPhase::RequestingDevice;
+    }
+
+    if (auto deviceResult = deviceFuture.TryGet())
+    {
+        if (!deviceResult->has_value()) [[unlikely]]
+        {
+            return std::unexpected(deviceResult->error());
+        }
+        else
+        {
+            device = std::move(deviceResult->value());
+            // now run surface setup while we're here, since it uses all 3 prev objects
+            Result<wgpu::Surface> surfaceResult = createSurface();
+            if (surfaceResult.has_value()) [[likely]]
+            {
+                surface = surfaceResult.value();
+                configureSurface();
+                return BootstrapPhase::Complete;
+            }
+            else
+            {
+                return std::unexpected(RhiError::SurfaceCreationFailed);
+            }
+        }
+    }
+    else
+    {
+        return BootstrapPhase::RequestingDevice;
+    }
+}
 
 Result<wgpu::Surface> Context::createSurface()
 {
     // todo: this GLFW shim sets the descriptor based on GLFW hints, but for things like colorspaces
     // this won't pass through at least it didn't in DiamondDogs, not without a good bit of extra
     // work
-    surface = wgpu::glfw::CreateSurfaceForWindow(instance, nativeWindow);
-    if (!surface)
+    wgpu::Surface createdSurface = wgpu::glfw::CreateSurfaceForWindow(instance, nativeWindow);
+    if (!createdSurface)
     {
         return std::unexpected(RhiError::SurfaceCreationFailed);
     }
-    return surface;
+    return createdSurface;
 }
 
 void Context::configureSurface()

@@ -72,6 +72,8 @@ public:
     Context(ContextCreateInfo _createInfo);
     ~Context();
 
+    // Async dispatches adapter and device request, returning control flow back to caller
+    Result<BootstrapPhase> RunBootstrap();
     ResizeStatus Resize(uint32_t width, uint32_t height);
     wgpu::TextureView AcquireNextFrame();
     void Present();
@@ -97,7 +99,9 @@ private:
     Result<wgpu::Instance> requestInstance();
     Result<GLFWwindow*> createNativeWindow();
     wgpu::RequestAdapterOptions getAdapterOptions() const;
+    Result<BootstrapPhase> bootstrapAdapter();
     wgpu::DeviceDescriptor getDeviceDescriptor() const;
+    Result<BootstrapPhase> bootstrapDevice();
     Result<wgpu::Surface> createSurface();
 
     void configureSurface();
