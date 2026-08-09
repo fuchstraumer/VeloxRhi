@@ -1,6 +1,7 @@
 #pragma once
 #ifndef VELOX_COROUTINE_ALLOCATOR_HPP
 #define VELOX_COROUTINE_ALLOCATOR_HPP
+#include <cstdlib>
 #include <cstdint>
 #include <cstddef>
 #include <memory>
@@ -88,9 +89,9 @@ public:
 #ifndef NDEBUG
             ++NumFramesAllocated;
             BytesAllocatedMalloc += size;
-#endif
             std::println("[velox][async] CoroutinePool falling back to malloc for frame of {} bytes", size);
-            return std::malloc(size);
+#endif
+            return malloc(size);
         }
     }
 
@@ -109,7 +110,7 @@ public:
 #ifndef NDEBUG
             ++NumFramesDeallocated;
 #endif
-            std::free(ptr);
+            free(ptr);
         }
     }
 

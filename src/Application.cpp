@@ -10,14 +10,12 @@
 #include <GLFW/glfw3.h>
 #endif
 
+#ifndef NDEBUG
+#include <print>
+#endif
+
 namespace velox
 {
-
-struct MainLoopState
-{
-    Context* context{ nullptr };
-    Application* application{ nullptr };
-};
 
 Application::Application(Context* _context) noexcept
     : contextPtr{ _context }
@@ -117,7 +115,9 @@ void MainLoopStep(Context& context, Application& app) noexcept
         Result<Application::LifecyclePhase> setupResult = app.RunSetup();
         if (!setupResult)
         {
+#ifndef NDEBUG
             std::println(stderr, "App setup failed. Exiting.");
+#endif
             app.RequestShutdown();
         }
         break;
@@ -142,9 +142,26 @@ void MainLoopStep(Context& context, Application& app) noexcept
 
 #ifdef __EMSCRIPTEN__
 
-void ApplicationMainLoop(Application& app)
+struct MainLoopState
 {
-    Application::LifecyclePhase currentPhase = app.CurrentPhase();
+    Context* context;
+    Application* app;
+};
+
+void EmMainLoopStep(void* user_data)
+{
+    MainLoopState* mainLoopState = reinterpret_cast<MainLoopState*>(user_data);
+    MainLoopStep(*mainLoopState->context, *mainLoopState->app);
+    if (mainLoopState->app->CurrentPhase() == Application::LifecyclePhase::Shutdown)
+    {
+        emscripten_cancel_main_loop();
+    }
+}
+
+void ApplicationMainLoop(Context& context, Application& app)
+{
+    static MainLoopState state{ &context, &app };
+    emscripten_set_main_loop_arg(EmMainLoopStep, &state, 0, true);
 }
 
 #else // ndef __EMSCRIPTEN__

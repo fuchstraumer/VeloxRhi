@@ -83,9 +83,9 @@ public:
     static_assert(N > 0, "SlotMap capacity must be greater than zero");
 
     using ValueType = T;
-    using HandleType = typename SlotHandle;
-    using IndexType = typename SlotHandle::IndexType;
-    using GenerationType = typename SlotHandle::GenerationType;
+    using HandleType = SlotHandle;
+    using IndexType = SlotHandle::IndexType;
+    using GenerationType = SlotHandle::GenerationType;
 
     constexpr SlotMap() noexcept
     {

@@ -7,6 +7,7 @@ namespace
 // todo: Finish creating shims to convert wgpu request statuses into RhiErrors [asap]
 constexpr velox::RhiError RhiErrorFromWgpuAdapterStatus(wgpu::RequestAdapterStatus status) noexcept
 {
+    return velox::RhiError::Success;
 }
 } // namespace
 

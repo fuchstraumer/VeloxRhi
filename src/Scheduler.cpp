@@ -34,7 +34,7 @@ TaggedCoroutineSlot& TaggedCoroutineSlot::operator=(TaggedCoroutineSlot&& other)
 void TaggedCoroutineSlot::SetHandle(std::coroutine_handle<> handle) noexcept
 {
     uintptr_t ptrValue = reinterpret_cast<uintptr_t>(handle.address());
-    assert((ptrValue & k_readyBit == 0) && "Coroutine handle not aligned correctly");
+    assert((ptrValue & k_readyBit) == 0);
 #ifndef __EMSCRIPTEN__
     std::atomic_ref<uintptr_t> dataAtomic{ data };
     dataAtomic.store(ptrValue, std::memory_order::release);

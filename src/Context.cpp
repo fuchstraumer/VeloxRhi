@@ -123,7 +123,6 @@ Result<Context::BootstrapPhase> Context::RunBootstrap()
         return result;
     }
     case BootstrapPhase::Complete:
-        std::println(stderr, "Context Bootstrap process completed. But how did you get here?");
         return BootstrapPhase::Complete;
     default:
         return std::unexpected(RhiError::BootstrapInInvalidState);
@@ -228,9 +227,6 @@ Scheduler* Context::GetScheduler() noexcept
 Result<wgpu::Instance> Context::requestInstance()
 {
     wgpu::InstanceDescriptor instanceDesc{};
-    const wgpu::InstanceFeatureName requiredFeatures[] = { wgpu::InstanceFeatureName::TimedWaitAny };
-    instanceDesc.requiredFeatureCount = std::size(requiredFeatures);
-    instanceDesc.requiredFeatures = requiredFeatures;
 #if !defined(__EMSCRIPTEN__) && defined(_WIN32)
     // as mentioned above, we want to make sure Dawn can find vulkan-1.dll on windows
     // (only when we're compiling for Native on Win32, of course!)
@@ -249,7 +245,7 @@ Result<wgpu::Instance> Context::requestInstance()
     {
         return std::unexpected(RhiError::InstanceRequestFailed);
     }
-    std::println(stderr, "    [velox][context] Instance creation successful.");
+    std::println(stderr, "[velox][context] Instance creation successful.");
     return std::move(instance);
 }
 
@@ -315,7 +311,7 @@ Result<Context::BootstrapPhase> Context::bootstrapAdapter()
         else
         {
             adapter = std::move(adapterResult->value());
-            std::println(stderr, "    [velox][context] Adapter creation successful.");
+            std::println(stderr, "[velox][context] Adapter creation successful.");
             return BootstrapPhase::RequestingDevice;
         }
     }
@@ -369,7 +365,7 @@ Result<Context::BootstrapPhase> Context::bootstrapDevice()
                 surface = surfaceResult.value();
                 configureSurface();
                 queue = device.GetQueue();
-                std::println(stderr, "    [velox][context] Device creation successful.");
+                std::println(stderr, "[velox][context] Device creation successful.");
                 return BootstrapPhase::Complete;
             }
             else
@@ -413,7 +409,7 @@ void Context::configureSurface()
     {
         supportedFormats += std::format(" {} |", magic_enum::enum_name(capabilities.formats[i]));
     }
-    std::println(stderr, "    [velox][context] Surface supported formats:{}", supportedFormats);
+    std::println(stderr, "[velox][context] Surface supported formats:{}", supportedFormats);
 
     auto format_iter =
         std::find_if(capabilities.formats, capabilities.formats + capabilities.formatCount, format_match);
@@ -422,7 +418,7 @@ void Context::configureSurface()
     {
         surfaceFormat = *format_iter;
         std::println(stderr,
-                     "    [velox][context] Using preferred surface format {}",
+                     "[velox][context] Using preferred surface format {}",
                      magic_enum::enum_name(surfaceFormat));
     }
     else
@@ -430,7 +426,7 @@ void Context::configureSurface()
         // if we can't find our preferred format, just pick the first one the surface supports
         surfaceFormat = capabilities.formats[0];
         std::println(stderr,
-                     "    [velox][context] Preferred surface format {} not supported by surface, using "
+                     "[velox][context] Preferred surface format {} not supported by surface, using "
                      "{} instead",
                      magic_enum::enum_name(createInfo.PreferredSurfaceFormat),
                      magic_enum::enum_name(surfaceFormat));

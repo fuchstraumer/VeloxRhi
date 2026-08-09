@@ -11,6 +11,7 @@
 #endif
 #include "TestShader.hpp"
 #include "HdrTestPatternShader.hpp"
+#include <print>
 
 using namespace velox;
 
@@ -125,8 +126,10 @@ private:
     RenderPipelineFuture pipelineFuture;
 };
 
+
 int main()
 {
+    std::println(stderr, "Application started.");
     ContextCreateInfo createInfo{};
     createInfo.ApplicationName = "Velox Test App";
     wgpu::FeatureName requestedFeatures[] = 
@@ -145,17 +148,9 @@ int main()
     createInfo.PreferredToneMappingMode = wgpu::ToneMappingMode::Extended;
     
     Context context(createInfo);
-
     TriangleApplication app(&context);
-    
-#ifndef __EMSCRIPTEN__
     ApplicationMainLoop(context, app);
-#else
-    MainLoopState mainLoopState{ &context, pipeline };
-    emscripten_set_main_loop_arg(EmMainLoopArg, &mainLoopState, 0, true);
-#endif
-
-    
+    std::println(stderr, "Application shutdown");
     return 0;
 }
 
