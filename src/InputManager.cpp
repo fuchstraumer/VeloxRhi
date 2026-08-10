@@ -106,6 +106,35 @@ std::span<const GestureEvent> InputManager::GetGesturesForFrame() const noexcept
 
 void InputManager::PrepareFrame() noexcept
 {
+    // todo-ship: consider erasing only events older than the focus event when losing focus
+    auto iter = std::find_if(incomingEvents.begin(),
+                             incomingEvents.end(),
+                             [](const ReceivedEvent& e)
+                             {
+                                 return std::holds_alternative<FocusEvent>(e.EventData);
+                             });
+
+    if (iter != incomingEvents.end())
+    {
+
+        auto FocusEvent = std::get<FocusEvent>(iter->EventData);
+        if (!FocusEvent.Focused)
+        {
+            gestureState = GestureRecognizerState{};
+            activeTouchPositions.clear();
+        }
+        else
+        {
+            incomingEvents.clear();
+            return;
+        }
+    }
+
+    // todo-ship: actually coalesce events, to handle high sampling rates and avoid flooding listeners with
+    // multiple events that could've been viewed as one singular event. for example, if a mouse moves 10
+    // pixels in one frame, we should only send one event with the final position, not 10 events with each
+    // intermediate position.
+
     evaluateGestures();
 }
 
@@ -185,8 +214,7 @@ void InputManager::processPointerReleaseOrCancelEvent(const double eventTime,
     if (activeTouchPositions.empty())
     {
         const double GestureDuration = eventTime - gestureState.GestureStartTime;
-        if (gestureState.GestureCouldBeTap &&
-            pointerEvent.State == PointerState::Released &&
+        if (gestureState.GestureCouldBeTap && pointerEvent.State == PointerState::Released &&
             GestureDuration < gestureConfig.TapMaxDurationMs)
         {
             gestureEvents.emplace_back(evaluateTapGestureEvent(pointerEvent.X, pointerEvent.Y, eventTime));
@@ -250,8 +278,9 @@ void InputManager::processPointerMoveEvent(const double eventTime, const Pointer
         const float currAngle = std::atan2(currDeltaX, currDeltaY);
         const float angleDelta = currAngle - prevAngle;
         // wrap angleDelta to [-pi, pi] range
-        const float wrappedAngleDelta = std::fmod(angleDelta + std::numbers::pi_v<float>, 2.0f * std::numbers::pi_v<float>) -
-                                        std::numbers::pi_v<float>;
+        const float wrappedAngleDelta =
+            std::fmod(angleDelta + std::numbers::pi_v<float>, 2.0f * std::numbers::pi_v<float>) -
+            std::numbers::pi_v<float>;
         gestureEvents.emplace_back(RotationGestureEvent{ wrappedAngleDelta, centerX, centerY });
         // (yells internally: i wish this was implemented as a coroutine instead of fsm!)
     }
@@ -259,7 +288,6 @@ void InputManager::processPointerMoveEvent(const double eventTime, const Pointer
     // update the last known position of this touch point
     prevTouchState.X = pointerEvent.X;
     prevTouchState.Y = pointerEvent.Y;
-
 }
 
 TapGestureEvent InputManager::evaluateTapGestureEvent(const float posX,
