@@ -19,7 +19,7 @@
             "name" : "Launch/Debug Engine [Web]",
             "type" : "chrome",
             "request": "launch",
-            "url" : "http://localhost:8080/${command:cmake.launchTargetFilename}.html",
+            "url" : "http://localhost:8080/${command:cmake.launchTargetFilename}",
             "webRoot": "${workspaceFolder}",
             "preLaunchTask": "Serve VeloxRhi demo with EmRun"
         },
