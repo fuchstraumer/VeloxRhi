@@ -17,6 +17,9 @@
 namespace velox
 {
 
+ // 100ms, to avoid huge deltas on focus changes or debugger pause
+constexpr static double k_MaxDeltaTimeInSeconds = 0.1;
+
 double PlatformNowSeconds() noexcept;
 
 Application::Application(Context* _context) noexcept
@@ -30,7 +33,7 @@ Application::~Application()
 
 void Application::TickClock(double now) noexcept
 {
-    clock.DeltaTime = now - clock.CurrentTime;
+    clock.DeltaTime = std::min(now - clock.CurrentTime, k_MaxDeltaTimeInSeconds);
     clock.CurrentTime = now;
 }
 
@@ -134,11 +137,6 @@ void MainLoopStep(Context& context, Application& app) noexcept
     }
     case Application::LifecyclePhase::Execution:
     {
-        static auto last = std::chrono::steady_clock::now();
-        auto now = std::chrono::steady_clock::now();
-        double dt = std::chrono::duration<double>(now - last).count();
-        last = now;
-
         app.OnUpdate();
         wgpu::TextureView backbuffer = context.AcquireNextFrame();
         app.OnRender(backbuffer);
