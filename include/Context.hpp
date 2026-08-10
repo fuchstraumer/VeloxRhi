@@ -42,7 +42,6 @@ struct ContextCreateInfo
     wgpu::ToneMappingMode PreferredToneMappingMode{ wgpu::ToneMappingMode::Standard };
     wgpu::PresentMode PreferredPresentationMode{ wgpu::PresentMode::Fifo };
 };
-
 /**
  * @brief Owns the classical Instance/Adapter/Device trio, but also has full
  * ownership of the surface and queue. Also handles a few bookkeeping and
@@ -89,8 +88,9 @@ public:
     wgpu::TextureFormat GetSurfaceFormat() const noexcept;
 
     bool HasFeature(wgpu::FeatureName feature) const noexcept;
+#ifndef __EMSCRIPTEN__
     GLFWwindow* GetNativeWindow() const noexcept;
-
+#endif
     Scheduler* GetScheduler() noexcept;
 
 private:
