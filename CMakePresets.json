@@ -36,12 +36,9 @@
         {
             "name" : "emscripten",
             "displayName" : "Emscripten",
-            "generator" : "Ninja",
+            "inherits" : "ninja-base-multi",
             "binaryDir" : "${sourceDir}/build/${presetName}",
-            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
+            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
         }
     ],
     "buildPresets": [
@@ -70,9 +67,28 @@
             "configuration" : "RelWithDebInfo"
         },
         {
-            "name" : "emscripten-build",
+            "name" : "emscripten-build-debug",
             "description" : "Builds the project using the Emscripten configure preset",
-            "configurePreset" : "emscripten"
+            "configurePreset" : "emscripten",
+            "configuration" : "Debug"
+        },
+        {
+            "name" : "emscripten-build-relwithdebinfo",
+            "description" : "Builds the project using the Emscripten configure preset",
+            "configurePreset" : "emscripten",
+            "configuration" : "RelWithDebInfo"
+        },
+        {
+            "name" : "emscripten-build-release",
+            "description" : "Builds the project using the Emscripten configure preset",
+            "configurePreset" : "emscripten",
+            "configuration" : "Release"
+        },
+        {
+            "name" : "emscripten-build-minsizerel",
+            "description" : "Builds the project using the Emscripten configure preset",
+            "configurePreset" : "emscripten",
+            "configuration" : "MinSizeRel"
         }
     ]
 }
