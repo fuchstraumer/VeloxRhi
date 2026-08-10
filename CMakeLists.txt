@@ -7,10 +7,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-
 # cmake/ contains our own FindVulkanHeaders.cmake; must be set before any find_package calls
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -106,6 +102,8 @@ set(VeloxRhi_Headers
     "${CMAKE_CURRENT_SOURCE_DIR}/include/Context.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/CoroutineAllocator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/Future.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/InputEvent.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/InputManager.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/Scheduler.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/TestShader.hpp"
@@ -118,9 +116,11 @@ set(VeloxRhi_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/AsyncTasks.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Context.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Future.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/InputManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Scheduler.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ShaderUtils.cpp")
 
+# todo-ship: Need to fix dxil.dll and related friends not copying to .exe output dir on Windows
 add_library(VeloxRhi STATIC ${VeloxRhi_SOURCES} ${VeloxRhi_Headers} ${OCEAN_FFT_GENERATED_OUTPUTS})
 target_include_directories(VeloxRhi PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

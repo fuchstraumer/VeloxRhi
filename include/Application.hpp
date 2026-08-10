@@ -36,7 +36,7 @@ public:
     Application(Context* context) noexcept;
     virtual ~Application();
 
-    // todo: same as Context, make this a less brittle FSM by packaging it in a variant w std::visit
+    // todo-ship: same as Context, make this a less brittle FSM by packaging it in a variant w std::visit
     enum class LifecyclePhase : uint8_t
     {
         Invalid = 0,
@@ -44,7 +44,7 @@ public:
         Execution,
         Shutdown
     };
-    
+
     // todo: this should be made private, or only accessible to MainLoopStep...
     void TickClock(double now) noexcept;
 
