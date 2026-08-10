@@ -104,11 +104,22 @@ set(VeloxRhi_Headers
     "${CMAKE_CURRENT_SOURCE_DIR}/include/Future.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/InputEvent.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/InputManager.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/Math.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/Scheduler.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/TestShader.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/VeloxErrors.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/math/Math.inl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathHashes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/SlotMap.hpp")
+
+# append corrent Math.inl backend based on platform
+if (EMSCRIPTEN)
+    list(APPEND VeloxRhi_Headers "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathBackendWASM.inl")
+elseif (WIN32)
+    # todo/note: if we move off dx12 as a backend, we may just want to use GLM or the like
+    list(APPEND VeloxRhi_Headers "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathBackendDX.inl")
+endif()
 
 set(VeloxRhi_SOURCES
     ${IMGUI_SOURCES}
