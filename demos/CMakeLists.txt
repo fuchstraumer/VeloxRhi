@@ -31,17 +31,21 @@ function(add_velox_rhi_demo NAME)
             "-sWASM=1"
             "-sALLOW_MEMORY_GROWTH=1"
             "-sMALLOC=emmalloc"
-            "-sUSE_GLFW=3"
-            "-flto"
-            "-sUSE_CLOSURE_COMPILER=1")
+            "-sUSE_GLFW=3")
 
-        if (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
-            target_compile_options(${NAME} PRIVATE -g3 -O0)
-            target_link_options(${NAME} PRIVATE
-                -g3 -O0 "-gseparate-dwarf=${NAME}.wasm.dwp")
+        if (CMAKE_BUILD_TYPE MATCHES "Debug")
+            target_compile_options(${NAME} PRIVATE -g -O0)
+            target_link_options(${NAME} PRIVATE -g -O0)
+            target_link_options(${NAME} PRIVATE "-gseparate-dwarf")
+        elseif (CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
+            target_compile_options(${NAME} PRIVATE -g -O2)
+            target_link_options(${NAME} PRIVATE -g -O2"-gseparate-dwarf")
+        elseif (CMAKE_BUILD_TYPE MATCHES "MinSizeRel")
+            target_compile_options(${NAME} PRIVATE -Oz -fno-exceptions -fno-rtti -flto)
+            target_link_options(${NAME} PRIVATE -Oz -closure=2 -flto)
         else()
-            target_compile_options(${NAME} PRIVATE -O3)
-            target_link_options(${NAME} PRIVATE -O3)
+            target_compile_options(${NAME} PRIVATE -Oz -fno-exceptions -fno-rtti -flto)
+            target_link_options(${NAME} PRIVATE -Oz -closure=2 -flto)
         endif()
 
         set_target_properties(${NAME} PROPERTIES SUFFIX ".html")
