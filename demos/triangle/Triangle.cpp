@@ -9,11 +9,182 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #endif
+#include "InputManager.hpp"
 #include "TestShader.hpp"
+#include <magic_enum/magic_enum.hpp>
 #include <print>
+#include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace velox;
+
+namespace
+{
+// Flip to inspect specific event or gesture types — recompile to change filter
+constexpr bool kLogCursorPosition = false; // very noisy on mouse move
+constexpr bool kLogPointerPress   = true;
+constexpr bool kLogPointerMove    = false; // very noisy
+constexpr bool kLogScroll         = true;
+constexpr bool kLogKeys           = false;
+constexpr bool kLogTextInput      = false;
+constexpr bool kLogFocus          = true;
+constexpr bool kLogPan            = true; // noisy during drag
+constexpr bool kLogPinch          = true;
+constexpr bool kLogRotation       = true;
+constexpr bool kLogSwipe          = true;
+constexpr bool kLogTap            = true;
+
+std::string FormatModifiers(uint8_t mods)
+{
+    if (mods == 0) { return "None"; }
+    std::string Result;
+    auto Append = [&](std::string_view name)
+    {
+        if (!Result.empty()) { Result += '+'; }
+        Result += name;
+    };
+    if (mods & 1u) { Append("Shift"); }
+    if (mods & 2u) { Append("Ctrl"); }
+    if (mods & 4u) { Append("Alt"); }
+    if (mods & 8u) { Append("Meta"); }
+    return Result;
+}
+
+void PrintReceivedEvent(const ReceivedEvent& ev)
+{
+    std::visit(
+        [&](const auto& e)
+        {
+            using T = std::decay_t<decltype(e)>;
+            if constexpr (std::is_same_v<T, CursorPositionEvent>)
+            {
+                if constexpr (kLogCursorPosition)
+                {
+                    std::println("[{:.1f}ms] Cursor ({:.1f}, {:.1f})", ev.Time, e.X, e.Y);
+                }
+            }
+            else if constexpr (std::is_same_v<T, PointerEvent>)
+            {
+                if (e.State == PointerState::Moved)
+                {
+                    if constexpr (kLogPointerMove)
+                    {
+                        std::println("[{:.1f}ms] Pointer {}#{} Moved @ ({:.1f}, {:.1f})",
+                            ev.Time,
+                            magic_enum::enum_name(e.Type),
+                            e.ID,
+                            e.X,
+                            e.Y);
+                    }
+                }
+                else
+                {
+                    if constexpr (kLogPointerPress)
+                    {
+                        std::println("[{:.1f}ms] Pointer {}#{} {} @ ({:.1f}, {:.1f})",
+                            ev.Time,
+                            magic_enum::enum_name(e.Type),
+                            e.ID,
+                            magic_enum::enum_name(e.State),
+                            e.X,
+                            e.Y);
+                    }
+                }
+            }
+            else if constexpr (std::is_same_v<T, ScrollEvent>)
+            {
+                if constexpr (kLogScroll)
+                {
+                    std::println("[{:.1f}ms] Scroll ({:+.2f}, {:+.2f})", ev.Time, e.DeltaX, e.DeltaY);
+                }
+            }
+            else if constexpr (std::is_same_v<T, KeyEvent>)
+            {
+                if constexpr (kLogKeys)
+                {
+                    std::println("[{:.1f}ms] Key {:3d} [{}] {}",
+                        ev.Time,
+                        e.KeyCode,
+                        FormatModifiers(e.Modifiers),
+                        magic_enum::enum_name(e.State));
+                }
+            }
+            else if constexpr (std::is_same_v<T, TextInputEvent>)
+            {
+                if constexpr (kLogTextInput)
+                {
+                    std::println("[{:.1f}ms] TextInput U+{:04X}", ev.Time, e.Codepoint);
+                }
+            }
+            else if constexpr (std::is_same_v<T, FocusEvent>)
+            {
+                if constexpr (kLogFocus)
+                {
+                    std::println("[{:.1f}ms] Focus {}", ev.Time, e.Focused ? "gained" : "lost");
+                }
+            }
+        },
+        ev.EventData);
+}
+
+void PrintGestureEvent(const GestureEvent& gest)
+{
+    std::visit(
+        [](const auto& g)
+        {
+            using T = std::decay_t<decltype(g)>;
+            if constexpr (std::is_same_v<T, PanGestureEvent>)
+            {
+                if constexpr (kLogPan)
+                {
+                    std::println("  Pan Δ({:+.1f}, {:+.1f})", g.DeltaX, g.DeltaY);
+                }
+            }
+            else if constexpr (std::is_same_v<T, PinchGestureEvent>)
+            {
+                if constexpr (kLogPinch)
+                {
+                    std::println("  Pinch {:.4f}x @ ({:.0f}, {:.0f})", g.Scale, g.CenterX, g.CenterY);
+                }
+            }
+            else if constexpr (std::is_same_v<T, RotationGestureEvent>)
+            {
+                if constexpr (kLogRotation)
+                {
+                    std::println("  Rotate {:+.5f}rad @ ({:.0f}, {:.0f})",
+                        g.AngleDelta,
+                        g.CenterX,
+                        g.CenterY);
+                }
+            }
+            else if constexpr (std::is_same_v<T, SwipeGestureEvent>)
+            {
+                if constexpr (kLogSwipe)
+                {
+                    std::println("  Swipe {}f vel=({:+.3f}, {:+.3f})px/ms @ ({:.0f}, {:.0f})",
+                        g.FingerCount,
+                        g.VelocityX,
+                        g.VelocityY,
+                        g.X,
+                        g.Y);
+                }
+            }
+            else if constexpr (std::is_same_v<T, TapGestureEvent>)
+            {
+                if constexpr (kLogTap)
+                {
+                    std::println("  Tap {}f x{} @ ({:.0f}, {:.0f})",
+                        g.FingerCount,
+                        g.TapCount,
+                        g.X,
+                        g.Y);
+                }
+            }
+        },
+        gest);
+}
+} // namespace
 
 static const std::vector<float> vertexData
 {
@@ -48,7 +219,7 @@ class TriangleApplication final : public Application
 {
 public:
 
-    TriangleApplication(Context* _context) noexcept : Application(_context) {}
+    TriangleApplication(Context* _context) noexcept : Application(_context), inputMgr(this) {}
 
     Result<LifecyclePhase> OnSetup() noexcept final
     {
@@ -66,6 +237,7 @@ public:
             }
         }
 
+        
         if constexpr (k_UseSplitVBOs)
         {
             if (!vertexBuffer && !vertexColorBuffer)
@@ -225,6 +397,28 @@ public:
         return LifecyclePhase::Initialization;
     }
 
+    void OnUpdate() final
+    {
+        if (!inputInitialized)
+        {
+#ifndef __EMSCRIPTEN__
+            inputMgr.Initialize(GetContext().GetNativeWindow());
+#else
+            inputMgr.Initialize(nullptr);
+#endif
+            inputInitialized = true;
+        }
+        inputMgr.PrepareFrame();
+        for (const ReceivedEvent& Ev : inputMgr.GetEventsForFrame())
+        {
+            PrintReceivedEvent(Ev);
+        }
+        for (const GestureEvent& Gest : inputMgr.GetGesturesForFrame())
+        {
+            PrintGestureEvent(Gest);
+        }
+    }
+
     void OnRender(wgpu::TextureView& backbuffer) final
     {
         Context& context = GetContext();
@@ -268,6 +462,8 @@ private:
     wgpu::RenderPipeline pipeline;
     RenderPipelineFuture pipelineFuture;
     MapWriteFuture mapWriteFuture;
+    InputManager inputMgr;
+    bool inputInitialized{ false };
 };
 
 
