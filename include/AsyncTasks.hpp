@@ -35,7 +35,7 @@ namespace detail
 } // namespace detail
 
 
-// todo: Since everything needs a Scheduler pointer at this point, that should be created by the Future
+// todo-ship: Since everything needs a Scheduler pointer at this point, that should be created by the Future
 // and used with await_transform so that it gets forwarded without us needing to pass it
 // even better: move the Future functions to be Context members so they get it direct from that
 
@@ -236,7 +236,7 @@ public:
     RenderPipelineAwaitable(const RenderPipelineAwaitable&) = delete;
     RenderPipelineAwaitable& operator=(const RenderPipelineAwaitable&) = delete;
 
-    // todo: in the future, we could probably query a cache here and immediate return already built pipelines!
+    // todo-ship: in the future, we could probably query a cache here and immediate return already built pipelines!
     // alternatively: hook them up to the same coroutine slot, so they're alerted on wakeup too?
     constexpr bool await_ready() const noexcept
     {

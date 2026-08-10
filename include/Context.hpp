@@ -37,7 +37,8 @@ struct ContextCreateInfo
     // but won't crash or fail if the surface doesn't support them (support varies a LOT ime)
     // Undefined => pick the first format the surface reports as supported
     wgpu::TextureFormat PreferredSurfaceFormat{ wgpu::TextureFormat::Undefined };
-    // todo: how does HDR support actually work? we'll need a tonemapper too....
+    // todo-answered: how does HDR support actually work? we'll need a tonemapper too....
+    // answer: this *just works* on Web. For desktop, we'll have to dig into native swapchain config (defer)
     wgpu::PredefinedColorSpace PreferredColorSpace{ wgpu::PredefinedColorSpace::SRGB };
     wgpu::ToneMappingMode PreferredToneMappingMode{ wgpu::ToneMappingMode::Standard };
     wgpu::PresentMode PreferredPresentationMode{ wgpu::PresentMode::Fifo };
@@ -59,7 +60,7 @@ class Context
 
 public:
 
-    // todo: Replace this with variants for each phase, which hold data for said stage
+    // todo-ship: Replace this with variants for each phase, which hold data for said stage
     enum class BootstrapPhase : uint8_t
     {
         Invalid = 0,

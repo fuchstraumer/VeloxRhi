@@ -82,7 +82,7 @@ Scheduler::Scheduler()
 
 Scheduler::~Scheduler()
 {
-    // todo: ensure coroutine queue in scheduler is fully drained before destruction (or during)
+    // todo-ship: ensure coroutine queue in scheduler is fully drained before destruction (or during)
     assert(slotMap.Empty());
 }
 

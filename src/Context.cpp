@@ -37,7 +37,7 @@ std::string GetSystemDirectory()
 namespace
 {
 
-// todo: we should sink these somewhere more portable, and which could actually give us debug info
+// todo-ship: we should sink these somewhere more portable, and which could actually give us debug info
 // in live clients maybe?
 [[noreturn]] void LogUncapturedError([[maybe_unused]] const wgpu::Device&,
                                      wgpu::ErrorType type,
@@ -50,6 +50,7 @@ namespace
     std::exit(1);
 }
 
+// todo-ship: this needs to signal through stop_token system so inflight coroutines can be cancelled
 void LogDeviceLost([[maybe_unused]] const wgpu::Device&,
                    wgpu::DeviceLostReason reason,
                    wgpu::StringView message)
@@ -101,7 +102,6 @@ Result<Context::BootstrapPhase> Context::RunBootstrap()
     {
     case BootstrapPhase::Invalid:
         return std::unexpected(RhiError::BootstrapInInvalidState);
-    // todo: [again] [srs] : we had to add this bc we crash on start withouth it. make state variant. pls. im so tired
     case BootstrapPhase::InstanceCreated:
         [[fallthrough]];
     case BootstrapPhase::RequestingAdapter:
@@ -150,6 +150,7 @@ ResizeStatus Context::Resize(uint32_t width, uint32_t height)
     }
 }
 
+// todo-ship: Result<wgpu::TextureView> instead of returning an empty view on failure, so we can bubble up errors
 wgpu::TextureView Context::AcquireNextFrame()
 {
     wgpu::SurfaceTexture surfaceTexture{};
@@ -163,7 +164,6 @@ wgpu::TextureView Context::AcquireNextFrame()
         std::println(stderr, "[velox][context] Next frame acquisition returned SuccessSuboptimal");
         return surfaceTexture.texture.CreateView();
     default:
-        // todo: this should be a std::expected return
         return wgpu::TextureView{};
     }
 }
@@ -251,11 +251,6 @@ Result<wgpu::Instance> Context::requestInstance()
 
 Result<GLFWwindow*> Context::createNativeWindow()
 {
-    // todo: We have a bunch of nice example code for how to set backbuffer bit depth and color
-    // stuff in DiamondDogs, along with configuring other parameters for the window. We should do
-    // some of that here, especially color depth (because it's interesting and can be fun to play
-    // with!)
-
     if (!glfwInit())
     {
         return std::unexpected(RhiError::GLFWInitFailed);
@@ -382,9 +377,6 @@ Result<Context::BootstrapPhase> Context::bootstrapDevice()
 
 Result<wgpu::Surface> Context::createSurface()
 {
-    // todo: this GLFW shim sets the descriptor based on GLFW hints, but for things like colorspaces
-    // this won't pass through at least it didn't in DiamondDogs, not without a good bit of extra
-    // work
     wgpu::Surface createdSurface = wgpu::glfw::CreateSurfaceForWindow(instance, nativeWindow);
     if (!createdSurface)
     {
@@ -437,7 +429,7 @@ void Context::configureSurface()
     surfaceConfig.usage = wgpu::TextureUsage::RenderAttachment;
     surfaceConfig.width = createInfo.InitialWidth;
     surfaceConfig.height = createInfo.InitialHeight;
-    // todo: assess later how/if we may want to change alpha mode
+    // todo-ship: assess later how/if we may want to change alpha mode
     surfaceConfig.alphaMode = wgpu::CompositeAlphaMode::Auto;
     surfaceConfig.presentMode = createInfo.PreferredPresentationMode;
 #ifdef __EMSCRIPTEN__

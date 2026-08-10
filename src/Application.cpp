@@ -107,8 +107,6 @@ Context& Application::GetContext() noexcept
     return *contextPtr;
 }
 
-// common main loop stepping function.
-// todo: this is where the variant will run visit. i think
 void MainLoopStep(Context& context, Application& app) noexcept
 {
     // absolute first step: get time from platform
