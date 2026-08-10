@@ -17,6 +17,8 @@
 namespace velox
 {
 
+double PlatformNowSeconds() noexcept;
+
 Application::Application(Context* _context) noexcept
     : contextPtr{ _context }
 {
@@ -24,6 +26,12 @@ Application::Application(Context* _context) noexcept
 
 Application::~Application()
 {
+}
+
+void Application::TickClock(double now) noexcept
+{
+    clock.DeltaTime = now - clock.CurrentTime;
+    clock.CurrentTime = now;
 }
 
 Application::LifecyclePhase Application::CurrentPhase() const noexcept
@@ -73,7 +81,7 @@ void Application::OnResize(uint32_t width, uint32_t height)
     // default implementation does nothing
 }
 
-void Application::OnUpdate(double dt)
+void Application::OnUpdate()
 {
     // default implementation does nothing
 }
@@ -86,8 +94,8 @@ void Application::RequestShutdown() noexcept
 
 void Application::OnShutdown()
 {
-#ifdef __EMSCRIPTEN
-    
+#ifdef __EMSCRIPTEN__
+    // default implementation does nothing
 #else
     // default implementation does nothing
 #endif
@@ -103,6 +111,10 @@ Context& Application::GetContext() noexcept
 // todo: this is where the variant will run visit. i think
 void MainLoopStep(Context& context, Application& app) noexcept
 {
+    // absolute first step: get time from platform
+    double now = PlatformNowSeconds();
+    app.TickClock(now);
+
     context.GetScheduler()->Tick();
     context.GetInstance().ProcessEvents();
 
@@ -129,7 +141,7 @@ void MainLoopStep(Context& context, Application& app) noexcept
         double dt = std::chrono::duration<double>(now - last).count();
         last = now;
 
-        app.OnUpdate(dt);
+        app.OnUpdate();
         wgpu::TextureView backbuffer = context.AcquireNextFrame();
         app.OnRender(backbuffer);
         context.Present();
@@ -141,6 +153,11 @@ void MainLoopStep(Context& context, Application& app) noexcept
 }
 
 #ifdef __EMSCRIPTEN__
+
+double PlatformNowSeconds() noexcept
+{
+    return emscripten_get_now() / 1000.0;
+}
 
 struct MainLoopState
 {
@@ -165,6 +182,11 @@ void ApplicationMainLoop(Context& context, Application& app)
 }
 
 #else // ndef __EMSCRIPTEN__
+
+double PlatformNowSeconds() noexcept
+{
+    return glfwGetTime();
+}
 
 void ApplicationMainLoop(Context& context, Application& app)
 {

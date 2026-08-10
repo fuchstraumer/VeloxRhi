@@ -15,6 +15,13 @@ namespace velox
 {
 class Context;
 
+/**@brief Represents time since init and current frame deltatime */
+struct FrameClock
+{
+    double CurrentTime{ 0.0 };
+    double DeltaTime{ 0.0 };
+};
+
 /**
  * @brief Lifecylcle interface any instance of a Velox application must implement. Takes a context reference
  * in each function to separate those two concerns and make ownership less annoying. Effectively serves as a
@@ -37,6 +44,9 @@ public:
         Execution,
         Shutdown
     };
+    
+    // todo: this should be made private, or only accessible to MainLoopStep...
+    void TickClock(double now) noexcept;
 
     // Attaches a Context to this application: call after initial instance creation, but before
     // Context runs bootstrapping (that must be handled asynchronously in event loop)
@@ -52,8 +62,9 @@ public:
     // once up front with the initial window/canvas size.
     virtual void OnResize(uint32_t width, uint32_t height);
 
-    // Called once per frame, before OnRender. dt is in seconds.
-    virtual void OnUpdate(double dt);
+    // Called once per frame, before OnRender. `dt` comes from internal FrameClock, which
+    // is updated at the start of the MainLoopStep function in the source
+    virtual void OnUpdate();
 
     // Called once per frame. `backbuffer` is the surface's current texture
     // view, already acquired - just record and submit your command buffer.
@@ -63,8 +74,12 @@ public:
 
     // Called once, before the Context is torn down.
     virtual void OnShutdown();
+
+    const FrameClock& GetFrameClock() const noexcept;
+
 protected:
     Context& GetContext() noexcept;
+    FrameClock clock;
 private:
     LifecyclePhase phase{ LifecyclePhase::Invalid };
 };
