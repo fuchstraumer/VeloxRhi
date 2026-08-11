@@ -169,7 +169,7 @@ if (EMSCRIPTEN)
     target_compile_options(VeloxRhi PUBLIC -msimd128)
     if (VELOX_RHI_MATH_RELAXED_SIMD)
         target_compile_options(VeloxRhi PUBLIC -mrelaxed-simd)
-        target_compile_definitions(VeloxRhi PUBLIC VX_MATH_RELAXED_FMA)
+        target_compile_definitions(VeloxRhi PUBLIC VX_MATH_RELAXED_SIMD)
     endif()
 endif()
 
@@ -210,4 +210,11 @@ option(VELOX_RHI_BUILD_DEMOS "Build demo executables for the engine" ON)
 
 if(VELOX_RHI_BUILD_DEMOS)
     add_subdirectory(demos)
+endif()
+
+option(VELOX_RHI_BUILD_TESTS "Build the standalone unit test executables" ON)
+
+if(VELOX_RHI_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests/unit_tests)
 endif()
