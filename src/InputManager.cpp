@@ -6,9 +6,10 @@
 #include <print>
 
 #ifndef __EMSCRIPTEN__
+struct GLFWwindow;
+#include "GLFW/glfw3.h"
 namespace
 {
-struct GLFWwindow;
 void CursorPositionCallback(GLFWwindow* window, double xpos, double ypos);
 void CursorEnterCallback(GLFWwindow* window, int entered);
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
@@ -63,7 +64,7 @@ InputManager::~InputManager()
 void InputManager::Initialize(void* platform_window)
 {
 #ifndef __EMSCRIPTEN__
-    auto* Window = reinterpret_cast<GLFWwindow*>(platform_window);
+    GLFWwindow* Window = reinterpret_cast<GLFWwindow*>(platform_window);
     glfwSetWindowUserPointer(Window, this);
     glfwSetCursorPosCallback(Window, CursorPositionCallback);
     glfwSetCursorEnterCallback(Window, CursorEnterCallback);

@@ -23,8 +23,9 @@ namespace velox
 
 enum class RhiError : uint64_t
 {
+    Invalid = 0,
+    Success = 1,
     // WebGPU errors
-    Success = 0,
     InstanceRequestFailed = 10,
     AdapterRequestFailed = 11,
     DeviceRequestFailed = 12,
