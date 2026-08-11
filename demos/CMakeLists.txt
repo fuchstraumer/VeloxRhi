@@ -24,7 +24,7 @@ function(add_velox_rhi_demo NAME)
             magic_enum::magic_enum)
     
         # Base Emscripten WebGPU flags
-        target_compile_options(${NAME} PRIVATE -msimd128 -flto)
+        target_compile_options(${NAME} PRIVATE -flto)
         target_link_options(${NAME} PRIVATE
             "-sEXIT_RUNTIME=1"
             "-sNO_FILESYSTEM=1"
@@ -65,3 +65,4 @@ function(add_velox_rhi_demo NAME)
 endfunction()
 
 add_subdirectory(triangle)
+add_subdirectory(mesh)

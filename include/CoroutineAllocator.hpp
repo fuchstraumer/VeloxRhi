@@ -17,7 +17,7 @@ namespace velox
 /**@brief Simple O(1) freelist memory arena for Coroutines, but using statically allocated memory
  * so we can reduce how many dynamic allocations we make while still having enough memory to work with
  */
-template<std::size_t BlockSizeInBytes, size_t PoolBlockCapacity>
+template<std::size_t BlockSizeInBytes, size_t PoolBlockCapacity, bool AllowMallocFallback = true>
 class CoroutinePool
 {
 
@@ -85,7 +85,7 @@ public:
 #endif
             return allocFromFreeList();
         }
-        else
+        else if (AllowMallocFallback) [[unlikely]]
         {
 #ifdef VELOX_ENABLE_DIAGNOSTICS
             ++NumFramesAllocated;
@@ -93,6 +93,10 @@ public:
             std::println("[velox][async] CoroutinePool falling back to malloc for frame of {} bytes", size);
 #endif
             return malloc(size);
+        }
+        else
+        {
+            return nullptr;
         }
     }
 
@@ -106,7 +110,7 @@ public:
 #endif
             pushToFreeList(ptr);
         }
-        else
+        else if (AllowMallocFallback)
         {
 #ifdef VELOX_ENABLE_DIAGNOSTICS
             ++NumFramesDeallocated;
