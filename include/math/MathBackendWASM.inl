@@ -920,7 +920,7 @@ VX_MATH_FORCEINLINE Matrix Matrix::Transpose() const noexcept
 //
 // Singular input is not special-cased: the result fills with infinities and NaNs. Check Determinant()
 // first if that matters.
-VX_MATH_FORCEINLINE Matrix Matrix::Inverse() const noexcept
+inline Matrix Matrix::Inverse() const noexcept
 {
     const Matrix transposed = Transpose();
     const v128_t mt0 = transposed.data[0];

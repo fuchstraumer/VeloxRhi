@@ -180,7 +180,7 @@ VX_MATH_FORCEINLINE Quaternion Quaternion::RotationRollPitchYaw(float pitch,
 // Shepperd's method: four equivalent recoveries, each dividing by a different component. The trace
 // comparisons pick the largest, avoiding the near-zero divide that wrecks the single-formula version.
 // Scalar and branchy on purpose - not a hot path, so clarity wins over SIMD.
-VX_MATH_FORCEINLINE Quaternion Quaternion::FromMatrix(const Matrix& mat) noexcept
+inline Quaternion Quaternion::FromMatrix(const Matrix& mat) noexcept
 {
     const float m00 = mat[0, 0];
     const float m01 = mat[0, 1];

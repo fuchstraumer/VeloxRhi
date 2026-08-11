@@ -122,7 +122,7 @@ VX_MATH_FORCEINLINE Quaternion Quaternion::RotationNormal(Vector normal_axis, fl
 
 // Composed explicitly, not via XMQuaternionRotationRollPitchYaw: the WASM backend composes by hand
 // anyway, and disagreeing on order would make one Euler triple mean two different rotations.
-VX_MATH_FORCEINLINE Quaternion Quaternion::RotationRollPitchYaw(float pitch,
+inline Quaternion Quaternion::RotationRollPitchYaw(float pitch,
                                                                 float yaw,
                                                                 float roll) noexcept
 {
@@ -132,7 +132,7 @@ VX_MATH_FORCEINLINE Quaternion Quaternion::RotationRollPitchYaw(float pitch,
     return aboutX.Multiply(aboutY).Multiply(aboutZ);
 }
 
-VX_MATH_FORCEINLINE Quaternion Quaternion::FromMatrix(const Matrix& mat) noexcept
+inline Quaternion Quaternion::FromMatrix(const Matrix& mat) noexcept
 {
     return Quaternion{ DirectX::XMQuaternionRotationMatrix(mat.Data()) };
 }

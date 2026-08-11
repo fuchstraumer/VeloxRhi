@@ -652,7 +652,7 @@ VX_MATH_FORCEINLINE float Cos(float radians) noexcept
 }
 
 // 2^n written straight into the exponent field, times the series for 2^f, f in [-0.5, 0.5]
-VX_MATH_FORCEINLINE float Exp2(float value) noexcept
+inline float Exp2(float value) noexcept
 {
     const float nearest = static_cast<float>(static_cast<int32_t>(value + (value < 0.0f ? -0.5f : 0.5f)));
     const float fraction = value - nearest;
@@ -674,7 +674,7 @@ VX_MATH_FORCEINLINE float Exp2(float value) noexcept
 }
 
 // Exponent from the bit pattern, mantissa folded into [1/sqrt2, sqrt2), then the atanh series
-VX_MATH_FORCEINLINE float Log2(float value) noexcept
+inline float Log2(float value) noexcept
 {
     uint32_t bits = 0u;
     std::memcpy(&bits, &value, sizeof(bits));
@@ -780,7 +780,7 @@ VX_MATH_FORCEINLINE float Tan(float radians) noexcept
     return pair.sin / pair.cos;
 }
 
-VX_MATH_FORCEINLINE float ATan(float value) noexcept
+inline float ATan(float value) noexcept
 {
     constexpr float k_HalfPi = std::numbers::pi_v<float> * 0.5f;
 

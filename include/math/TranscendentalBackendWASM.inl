@@ -69,7 +69,7 @@ namespace detail
 
     // log2 of a positive finite value: exponent + atanh series in t = (m - 1) / (m + 1)
     template<bool Estimate>
-    VX_MATH_FORCEINLINE v128_t Log2Impl(v128_t value) noexcept
+    inline v128_t Log2Impl(v128_t value) noexcept
     {
         const v128_t bits = value;
         const v128_t exponentBits =
@@ -326,7 +326,7 @@ namespace detail
     // atan(x) = sign(x) * pi/2 - atan(1/x) for |x| > 1. Both branches are evaluated and selected, so
     // the reciprocal is taken in lanes that will discard it - substituting 1 there keeps a lane the
     // other branch owns from dividing by zero.
-    VX_MATH_FORCEINLINE v128_t ATanImpl(v128_t value) noexcept
+    inline v128_t ATanImpl(v128_t value) noexcept
     {
         constexpr float k_HalfPi = std::numbers::pi_v<float> * 0.5f;
 
