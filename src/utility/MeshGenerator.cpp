@@ -158,8 +158,7 @@ std::unique_ptr<MeshData> CreateIcosphere(size_t detail_level)
          4,  9,  5,    2,  4, 11,    6,  2, 10,    8,  6,  7,    9,  8,  1
     };
 
-    // Normalize initial positions to lay on the sphere. Normalize<3> divides every lane by the
-    // xyz length, w included, so the homogeneous w has to be put back afterwards
+    // Normalize<3> divides every lane by the xyz length, w included, so w has to be restored
     std::transform(positions.begin(), positions.end(), positions.begin(), [](const Float4& p)
     {
         Float4 onSphere = FromVector(ToVector(p).Normalize<3>());
@@ -182,9 +181,8 @@ std::unique_ptr<MeshData> CreateIcosphere(size_t detail_level)
 
         Vector pos1 = ToVector(positions[v1]);
         Vector pos2 = ToVector(positions[v2]);
-        // Normalize<3>, not <4>: both operands are homogeneous points with w == 1, so their sum has
-        // w == 2, and Normalize<4> would divide by sqrt(x^2 + y^2 + z^2 + 4) - pulling the midpoint
-        // well inside the unit sphere instead of onto it
+        // <3>, not <4>: both operands have w == 1, so their sum has w == 2, and Normalize<4> would
+        // divide by sqrt(x^2 + y^2 + z^2 + 4), pulling the midpoint inside the unit sphere
         Vector mid = (pos1 + pos2).Normalize<3>();
         Float4 midpoint = FromVector(mid);
         midpoint.w = 1.0f;

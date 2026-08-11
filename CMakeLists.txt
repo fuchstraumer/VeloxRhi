@@ -62,6 +62,9 @@ set(MAGIC_ENUM_OPT_BUILD_TESTS OFF)
 set(MAGIC_ENUM_OPT_INSTALL OFF)
 add_subdirectory(third_party/magic_enum)
 
+# Add the offline shader compiler, a tool for compiling shaders to baked-in WGSL source code for
+# WebGPU to consume and bind at runtime. This has to be run before emscripten builds ship or are
+# tested.
 if(NOT EMSCRIPTEN)
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/tools/shader_cooker")
 endif()
@@ -97,53 +100,74 @@ add_custom_command(
     VERBATIM)
 set_source_files_properties(${OCEAN_FFT_GENERATED_OUTPUTS} PROPERTIES GENERATED TRUE)
 
-set(VeloxRhi_Headers
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/Application.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/AsyncTasks.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/Context.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/CoroutineAllocator.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/Future.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/InputEvent.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/InputManager.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/Math.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/Scheduler.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/ShaderUtils.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/TestShader.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/VeloxErrors.hpp"
+set(VeloxRhi_CommonSources
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/common/VeloxErrors.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/common/VeloxLogging.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/VeloxErrors.cpp")
+
+set(VeloxRhi_CoreSources
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/Application.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/AsyncTasks.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/Context.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/CoroutineAllocator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/Future.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/InputEvent.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/InputManager.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/Scheduler.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Application.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/AsyncTasks.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Context.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Future.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/InputManager.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Scheduler.cpp")
+
+set(VeloxRhi_UtilitySources
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/MeshGenerator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/SlotMap.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/utility/MeshGenerator.cpp")
+
+set(VeloxRhi_SharedMathSources
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/math/Math.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/math/Math.inl"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathHashes.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathPolynomials.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/MeshGenerator.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/SlotMap.hpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathPolynomials.hpp")
+
+set(VeloxRhi_Shaders
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/OceanFFT.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/IfftPermute.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/IfftRadix2_f32.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/IfftRadix2.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/IfftRadix4.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/InitSpectrum.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/OceanFftBindings.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/OceanFftCommon.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/OceanFftDims.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/Spectra.slang")
 
 # append corrent Math.inl backend based on platform
 if (EMSCRIPTEN)
-    list(APPEND VeloxRhi_Headers
+    set(VeloxRhi_BackendMathSources
         "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathBackendWASM.inl"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/math/QuaternionBackendWASM.inl"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/math/TranscendentalBackendWASM.inl")
 elseif (WIN32)
     # todo/note: if we move off dx12 as a backend, we may just want to use GLM or the like
-    list(APPEND VeloxRhi_Headers
+    set(VeloxRhi_BackendMathSources
         "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathBackendDX.inl"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/math/QuaternionBackendDX.inl"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/math/TranscendentalBackendDX.inl")
 endif()
 
-set(VeloxRhi_SOURCES
-    ${IMGUI_SOURCES}
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Application.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/AsyncTasks.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Context.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Future.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/InputManager.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Scheduler.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ShaderUtils.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/utility/MeshGenerator.cpp")
-
-
 # todo-ship: Need to fix dxil.dll and related friends not copying to .exe output dir on Windows
-add_library(VeloxRhi STATIC ${VeloxRhi_SOURCES} ${VeloxRhi_Headers} ${OCEAN_FFT_GENERATED_OUTPUTS})
+add_library(VeloxRhi STATIC
+    ${VeloxRhi_CommonSources}
+    ${VeloxRhi_CoreSources}
+    ${VeloxRhi_UtilitySources}
+    ${VeloxRhi_SharedMathSources}
+    ${VeloxRhi_BackendMathSources}
+    ${IMGUI_SOURCES}
+    ${OCEAN_FFT_GENERATED_OUTPUTS})
+
 target_include_directories(VeloxRhi PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui
@@ -157,6 +181,14 @@ set(VeloxRHI_mikktspace_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace/mikktspace.c")
 
 target_sources(VeloxRhi PRIVATE ${VeloxRHI_mikktspace_SOURCES})
+
+source_group("rhi\\common" FILES ${VeloxRhi_CommonSources})
+source_group("rhi\\core" FILES ${VeloxRhi_CoreSources})
+source_group("rhi\\utility" FILES ${VeloxRhi_UtilitySources})
+source_group("rhi\\math" FILES ${VeloxRhi_SharedMathSources} ${VeloxRhi_BackendMathSources})
+source_group("rhi\\imgui" FILES ${IMGUI_SOURCES})
+source_group("rhi\\shaders" FILES ${VeloxRhi_Shaders})
+source_group("rhi\\generated" FILES ${OCEAN_FFT_GENERATED_OUTPUTS})
 
 if (NOT EMSCRIPTEN)
     target_include_directories(VeloxRhi PUBLIC
@@ -184,24 +216,6 @@ target_compile_definitions(VeloxRhi PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
 if (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
     target_compile_definitions(VeloxRhi PUBLIC VELOX_ENABLE_DIAGNOSTICS)
 endif()
-
-set(VeloxRhi_Shaders
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/OceanFFT.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/IfftPermute.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/IfftRadix2_f32.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/IfftRadix2.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/IfftRadix4.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/InitSpectrum.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/OceanFftBindings.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/OceanFftCommon.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/OceanFftDims.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/compute/Spectra.slang")
-
-source_group("rhi\\include" FILES ${VeloxRhi_Headers})
-source_group("rhi\\src" FILES ${VeloxRhi_SOURCES})
-source_group("rhi\\imgui" FILES ${IMGUI_SOURCES})
-source_group("rhi\\shaders" FILES ${VeloxRhi_Shaders})
-source_group("rhi\\generated" FILES ${OCEAN_FFT_GENERATED_OUTPUTS})
 
 if (EMSCRIPTEN)
     target_link_libraries(VeloxRhi PUBLIC emdawnwebgpu_cpp webgpu_glfw magic_enum::magic_enum)

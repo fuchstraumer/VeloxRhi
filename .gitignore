@@ -16,3 +16,5 @@ include/generated/
 src/generated/
 .vs/
 scratch/
+docs/
+.vscode/c_cpp_properties.json
