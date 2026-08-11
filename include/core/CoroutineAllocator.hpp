@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #ifdef VELOX_ENABLE_DIAGNOSTICS
+#include <cstring>
 #include <print>
 #endif
 
@@ -22,6 +23,7 @@ class CoroutinePool
 {
 
 #ifdef VELOX_ENABLE_DIAGNOSTICS
+    static constexpr unsigned char k_PoisonByte{ 0xDDu };
     inline static std::size_t NumFramesAllocated{0u};
     inline static std::size_t NumFramesDeallocated{0u};
     inline static std::size_t BytesAllocatedFreeList{0u};
@@ -107,6 +109,11 @@ public:
 #ifdef VELOX_ENABLE_DIAGNOSTICS
             ++NumFramesDeallocated;
             BytesDeallocatedFreeList += BlockSizeInBytes;
+            // the freelist never scrubs freed blocks on its own, so a coroutine frame that's
+            // abandoned (destroyed without dropping every handle to it) stays byte-for-byte
+            // intact and silently "works" when something later resumes it. Poisoning here turns
+            // that into an immediate, deterministic crash on resume instead
+            std::memset(ptr, k_PoisonByte, BlockSizeInBytes);
 #endif
             pushToFreeList(ptr);
         }
@@ -114,6 +121,7 @@ public:
         {
 #ifdef VELOX_ENABLE_DIAGNOSTICS
             ++NumFramesDeallocated;
+            std::memset(ptr, k_PoisonByte, size);
 #endif
             free(ptr);
         }

@@ -41,7 +41,12 @@ struct Scheduler
     SlotHandle Enqueue(std::coroutine_handle<> handle) noexcept;
     RhiError MarkReady(SlotHandle mapHandle, std::coroutine_handle<> coroHandle) noexcept;
     void Tick();
-
+    // if handle (future) was destroyed, the callback lambda (which captures by value) will still have that handle
+    // value saved. first, we want to check if the handle is around: if it's not, that means the future was destroyed,
+    // and we need to abandon the coroutine frame. If it is still around, we can resume it.
+    bool IsHandleAlive(SlotHandle mapHandle, std::coroutine_handle<> coroHandle) const noexcept;
+    // ownership transfer from frame to scheduler, scheduler will destroy the coroutine only when it is *done*
+    void Abandon(SlotHandle mapHandle, std::coroutine_handle<> coroHandle) noexcept;
 private:
     SlotMap<TaggedCoroutineSlot, 2048> slotMap;
 };

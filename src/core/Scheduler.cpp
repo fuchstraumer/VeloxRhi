@@ -83,6 +83,7 @@ Scheduler::Scheduler()
 Scheduler::~Scheduler()
 {
     // todo-ship: ensure coroutine queue in scheduler is fully drained before destruction (or during)
+    // we have groundwork for this now - Abandon() will enqueue canceled or faulty coroutines to be destroyed
     assert(slotMap.Empty());
 }
 
@@ -119,6 +120,22 @@ void Scheduler::Tick()
         }
     };
     slotMap.EraseIf(erasePredicate);
+}
+
+bool Scheduler::IsHandleAlive(SlotHandle mapHandle, std::coroutine_handle<> coroHandle) const noexcept
+{
+    if (!slotMap.Contains(mapHandle))
+    {
+        return false;
+    }
+    const TaggedCoroutineSlot& slot = slotMap[mapHandle];
+    return slot.GetHandleIfReady() == coroHandle;
+}
+
+void Scheduler::Abandon(SlotHandle mapHandle, std::coroutine_handle<> coroHandle) noexcept
+{
+    // make sure if we get to this, the map has had it's slot erased already
+    assert(!slotMap.Contains(mapHandle));
 }
 
 } // namespace velox

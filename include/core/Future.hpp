@@ -9,6 +9,11 @@ namespace velox
 
 struct Scheduler;
 
+namespace detail
+{
+    
+}
+
 /**Brainblast moment: this is what holds the promise type. This is what defines the type of the result, what
  * actually carries some type information, and also what owns the coroutine_handle. Scheduler is not just a
  * big pile of type-erased coroutine handles. This simplifies awaitable dispatching tremendously.
@@ -21,6 +26,32 @@ struct Future
     struct promise_type
     {
         Result<T> result_value;
+        std::coroutine_handle<> continuation;
+
+        struct FinalAwaiter
+        {
+            constexpr bool await_ready() const noexcept
+            {
+                return false;
+            }
+
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> handle) noexcept
+            {
+                auto& promise = handle.promise();
+                if (promise.continuation)
+                {
+                    return promise.continuation;
+                }
+                else
+                {
+                    return std::noop_coroutine();
+                }
+            }
+
+            constexpr void await_resume() const noexcept
+            {
+            }
+        };
 
         Future<T> get_return_object() noexcept
         {
@@ -34,8 +65,8 @@ struct Future
             return {};
         }
 
-        // always suspend at the end so we can extract the result before destruction
-        constexpr std::suspend_always final_suspend() noexcept
+        // suspend_always->FinalAwaiter to handle continuation chaining
+        FinalAwaiter final_suspend() noexcept
         {
             return {};
         }
@@ -80,7 +111,7 @@ struct Future
 
     ~Future()
     {
-        if (handle)
+        if (handle && !handle.done())
         {
             handle.destroy();
         }
@@ -94,8 +125,15 @@ struct Future
     }
     Future& operator=(Future&& other) noexcept
     {
-        handle = other.handle;
-        other.handle = nullptr;
+        if (this != &other)
+        {
+            if (handle && !handle.done())
+            {
+                handle.destroy();
+            }
+            handle = other.handle;
+            other.handle = nullptr;
+        }
         return *this;
     }
 

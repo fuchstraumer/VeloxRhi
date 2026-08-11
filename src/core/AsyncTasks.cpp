@@ -9,6 +9,16 @@ constexpr velox::RhiError RhiErrorFromWgpuAdapterStatus(wgpu::RequestAdapterStat
 {
     return velox::RhiError::Success;
 }
+
+// We need to convert the error code to some common schema: so far we know that the code 2 is always shared between all
+// status enums; cancelled is as well. Others beyond those two are specific to the object. The first two codes tell us
+// we need to abandon the coroutine frame, handing it off to scheduler to tick and then destroy
+template<typename StatusEnum>
+constexpr bool StatusEnumIsAbandonable(StatusEnum status) noexcept
+{
+    return static_cast<std::underlying_type_t<StatusEnum>>(status) == 2 ||
+           static_cast<std::underlying_type_t<StatusEnum>>(status) == 3;
+}
 } // namespace
 
 namespace velox
@@ -34,8 +44,8 @@ void AdapterAwaitable::await_suspend(std::coroutine_handle<> coro_handle)
     instance.RequestAdapter(&options,
                             wgpu::CallbackMode::AllowSpontaneous,
                             [this, slotHandle, coro_handle](wgpu::RequestAdapterStatus status,
-                                                        wgpu::Adapter adapter,
-                                                        wgpu::StringView message)
+                                                            wgpu::Adapter adapter,
+                                                            wgpu::StringView message)
                             {
                                 if (status != wgpu::RequestAdapterStatus::Success)
                                 {
