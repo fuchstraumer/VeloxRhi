@@ -1,77 +1,32 @@
 #pragma once
-// WASM SIMD128 backend for math::Vector / math::Matrix
+// WASM SIMD128 backend for math::Vector / math::Matrix. Included by Math.inl when
+// VX_MATH_BACKEND_WASM is 1 (Emscripten builds, or a forced override).
 // Requires <wasm_simd128.h>, <cmath>, and <limits>, already included by Math.hpp.
+// Do not include Math.hpp/Math.inl from here: this file is reached *through* them, and re-entering
+// that cycle would parse every definition below twice (the pragma above only takes effect once the
+// nested inclusion has already completed). Match MathBackendDX.inl - include nothing.
 namespace velox::math
 {
 namespace detail
 {
-    // General 4x4 inverse via Gauss-Jordan elimination with partial
-    // pivoting. Not vectorized - matrix inversion is rarely a hot-path
-    // operation (once or twice a frame, typically), so a clear scalar
-    // implementation is worth more here than a bespoke SIMD one.
-    inline bool InvertMatrix4x4(const float in[4][4], float out[4][4]) noexcept
+    // a * b + c
+    VX_MATH_FORCEINLINE v128_t MulAdd(v128_t a, v128_t b, v128_t c) noexcept
     {
-        float a[4][8];
-        for (int r = 0; r < 4; ++r)
-        {
-            for (int c = 0; c < 4; ++c)
-            {
-                a[r][c] = in[r][c];
-                a[r][c + 4] = (r == c) ? 1.0f : 0.0f;
-            }
-        }
+#if defined(VX_MATH_RELAXED_FMA)
+        return wasm_f32x4_relaxed_madd(a, b, c);
+#else
+        return wasm_f32x4_add(wasm_f32x4_mul(a, b), c);
+#endif
+    }
 
-        for (int col = 0; col < 4; ++col)
-        {
-            int pivotRow = col;
-            float pivotVal = std::fabs(a[col][col]);
-            for (int r = col + 1; r < 4; ++r)
-            {
-                float v = std::fabs(a[r][col]);
-                if (v > pivotVal)
-                {
-                    pivotVal = v;
-                    pivotRow = r;
-                }
-            }
-            if (pivotVal < 1e-8f)
-            {
-                return false; // singular
-            }
-            if (pivotRow != col)
-            {
-                for (int c = 0; c < 8; ++c)
-                {
-                    std::swap(a[col][c], a[pivotRow][c]);
-                }
-            }
-            float inv_pivot = 1.0f / a[col][col];
-            for (int c = 0; c < 8; ++c)
-            {
-                a[col][c] *= inv_pivot;
-            }
-            for (int r = 0; r < 4; ++r)
-            {
-                if (r == col)
-                {
-                    continue;
-                }
-                float factor = a[r][col];
-                for (int c = 0; c < 8; ++c)
-                {
-                    a[r][c] -= factor * a[col][c];
-                }
-            }
-        }
-
-        for (int r = 0; r < 4; ++r)
-        {
-            for (int c = 0; c < 4; ++c)
-            {
-                out[r][c] = a[r][c + 4];
-            }
-        }
-        return true;
+    // c - a * b
+    VX_MATH_FORCEINLINE v128_t NegMulAdd(v128_t a, v128_t b, v128_t c) noexcept
+    {
+#if defined(VX_MATH_RELAXED_FMA)
+        return wasm_f32x4_relaxed_nmadd(a, b, c);
+#else
+        return wasm_f32x4_sub(c, wasm_f32x4_mul(a, b));
+#endif
     }
 
     inline float Det3x3(
@@ -238,34 +193,65 @@ VX_MATH_FORCEINLINE Vector Vector::ReciprocalSqrt() const noexcept
     return Vector{ wasm_f32x4_div(wasm_f32x4_splat(1.0f), wasm_f32x4_sqrt(data)) };
 }
 
-// Dot<N> extracts only the lanes relevant to N, matching the semantics of
-// DirectXMath's XMVector{2,3,4}Dot (which ignore unused lanes regardless
-// of what garbage they may hold) rather than assuming unused lanes are
-// zeroed.
-template<int N>
-VX_MATH_FORCEINLINE float Vector::Dot(Vector other) const noexcept
+// DotVec<N> reduces with a full-width butterfly rather than porting the SSE
+// _mm_add_ss sequences DirectXMath uses. WASM SIMD128 has no single-lane add, so
+// the butterfly is both cheaper and simpler here - and it leaves the result
+// splatted across all four lanes, which is what every caller downstream wants.
+// Lanes above N are masked off first, matching XMVector{2,3}Dot's guarantee that
+// unused lanes are ignored regardless of what garbage they hold.
+namespace detail
 {
-    static_assert(N >= 2 && N <= 4, "Dot dimensionality must be 2, 3, or 4");
-    v128_t prod = wasm_f32x4_mul(data, other.data);
-    float px = wasm_f32x4_extract_lane(prod, 0);
-    float py = wasm_f32x4_extract_lane(prod, 1);
-    if constexpr (N == 2)
+    // Butterfly reduction: two shuffle/add pairs sum all four lanes and leave the
+    // total in every lane.
+    VX_MATH_FORCEINLINE v128_t HorizontalSum4(v128_t vec) noexcept
     {
-        return px + py;
+        vec = wasm_f32x4_add(vec, wasm_i32x4_shuffle(vec, vec, 2, 3, 0, 1));
+        return wasm_f32x4_add(vec, wasm_i32x4_shuffle(vec, vec, 1, 0, 3, 2));
     }
-    else
-    {
-        float pz = wasm_f32x4_extract_lane(prod, 2);
-        if constexpr (N == 3)
-        {
-            return px + py + pz;
-        }
-        else
-        {
-            float pw = wasm_f32x4_extract_lane(prod, 3);
-            return px + py + pz + pw;
-        }
-    }
+} // namespace detail
+
+template<>
+VX_MATH_FORCEINLINE Vector Vector::DotVec<2>(Vector other) const noexcept
+{
+    const v128_t products = wasm_f32x4_mul(data, other.data);
+    const v128_t zero = wasm_f32x4_splat(0.0f);
+    // keep x and y, force z and w to zero
+    const v128_t masked = wasm_i32x4_shuffle(products, zero, 0, 1, 4, 5);
+    return Vector{ detail::HorizontalSum4(masked) };
+}
+
+template<>
+VX_MATH_FORCEINLINE float Vector::Dot<2>(Vector other) const noexcept
+{
+    return wasm_f32x4_extract_lane(DotVec<2>(other).data, 0);
+}
+
+template<>
+VX_MATH_FORCEINLINE Vector Vector::DotVec<3>(Vector other) const noexcept
+{
+    const v128_t products = wasm_f32x4_mul(data, other.data);
+    const v128_t zero = wasm_f32x4_splat(0.0f);
+    // keep x, y and z, force w to zero
+    const v128_t masked = wasm_i32x4_shuffle(products, zero, 0, 1, 2, 4);
+    return Vector{ detail::HorizontalSum4(masked) };
+}
+
+template<>
+VX_MATH_FORCEINLINE float Vector::Dot<3>(Vector other) const noexcept
+{
+    return wasm_f32x4_extract_lane(DotVec<3>(other).data, 0);
+}
+
+template<>
+VX_MATH_FORCEINLINE Vector Vector::DotVec<4>(Vector other) const noexcept
+{
+    return Vector{ detail::HorizontalSum4(wasm_f32x4_mul(data, other.data)) };
+}
+
+template<>
+VX_MATH_FORCEINLINE float Vector::Dot<4>(Vector other) const noexcept
+{
+    return wasm_f32x4_extract_lane(DotVec<4>(other).data, 0);
 }
 
 template<int N>
@@ -282,47 +268,70 @@ VX_MATH_FORCEINLINE float Vector::Length() const noexcept
     return std::sqrt(Dot<N>(*this));
 }
 
+// DotVec<N> already splats the squared length across every lane, so the divide
+// stays in the vector domain - no lane extraction, no scalar sqrt, no re-splat.
+// A zero-length input yields infinities/NaN here, matching the WASM backend's
+// no-special-cases stance rather than DirectXMath's XMVector3Normalize.
 template<int N>
 VX_MATH_FORCEINLINE Vector Vector::Normalize() const noexcept
 {
     static_assert(N >= 2 && N <= 4, "Normalize dimensionality must be 2, 3, or 4");
-    float invLen = 1.0f / std::sqrt(Dot<N>(*this));
-    return Vector{ wasm_f32x4_mul(data, wasm_f32x4_splat(invLen)) };
+    const v128_t lengthSq = DotVec<N>(*this).Data();
+    return Vector{ wasm_f32x4_div(data, wasm_f32x4_sqrt(lengthSq)) };
 }
 
-// Cross product only makes sense for 3D vectors. Standard SIMD cross
-// product via two "rotated" shuffles: (a.yzx*b.zxy) - (a.zxy*b.yzx).
 VX_MATH_FORCEINLINE Vector Vector::Cross(Vector other) const noexcept
 {
-    v128_t a_yzx = wasm_i32x4_shuffle(data, data, 1, 2, 0, 3);
-    v128_t a_zxy = wasm_i32x4_shuffle(data, data, 2, 0, 1, 3);
-    v128_t b_yzx = wasm_i32x4_shuffle(other.data, other.data, 1, 2, 0, 3);
-    v128_t b_zxy = wasm_i32x4_shuffle(other.data, other.data, 2, 0, 1, 3);
-    return Vector{ wasm_f32x4_sub(wasm_f32x4_mul(a_yzx, b_zxy), wasm_f32x4_mul(a_zxy, b_yzx)) };
+    // we might be able to get this to use less registers?
+    v128_t vYZXW = wasm_i32x4_shuffle(data, data, 1, 2, 0, 3);
+    v128_t vOtherZXYW = wasm_i32x4_shuffle(other.data, other.data, 2, 0, 1, 3);
+    v128_t vSelfZXYW = wasm_i32x4_shuffle(data, data, 2, 0, 1, 3);
+    v128_t vOtherYZXW = wasm_i32x4_shuffle(other.data, other.data, 1, 2, 0, 3);
+    vYZXW = wasm_f32x4_mul(vYZXW, vOtherZXYW);
+    vSelfZXYW = wasm_f32x4_mul(vSelfZXYW, vOtherYZXW);
+    return Vector{ wasm_f32x4_sub(vYZXW, vSelfZXYW) };
 }
 
 VX_MATH_FORCEINLINE Vector Vector::Lerp(Vector target, float t) const noexcept
 {
-    v128_t diff = wasm_f32x4_sub(target.data, data);
+    const v128_t diff = wasm_f32x4_sub(target.data, data);
+#if defined(VX_MATH_RELAXED_FMA)
+    return Vector{ wasm_f32x4_relaxed_madd(diff, wasm_f32x4_splat(t), data) };
+#else
     return Vector{ wasm_f32x4_add(data, wasm_f32x4_mul(diff, wasm_f32x4_splat(t))) };
+#endif
 }
 
+// incident - 2 * dot(incident, normal) * normal, kept entirely in the vector
+// domain off the back of DotVec's splatted result. relaxed_nmadd computes
+// -(a * b) + c, which is exactly this expression in one instruction.
 template<int N>
 VX_MATH_FORCEINLINE Vector Vector::Reflect(Vector normal) const noexcept
 {
     static_assert(N >= 2 && N <= 4, "Reflect dimensionality must be 2, 3, or 4");
-    float d = Dot<N>(normal);
-    return *this - normal * (2.0f * d);
+    const v128_t scaledDot = wasm_f32x4_mul(DotVec<N>(normal).Data(), wasm_f32x4_splat(2.0f));
+#if defined(VX_MATH_RELAXED_FMA)
+    return Vector{ wasm_f32x4_relaxed_nmadd(normal.data, scaledDot, data) };
+#else
+    return Vector{ wasm_f32x4_sub(data, wasm_f32x4_mul(normal.data, scaledDot)) };
+#endif
 }
 
+// pmin/pmax rather than min/max throughout. wasm_f32x4_min/max implement IEEE-754 NaN-propagating
+// semantics and lower to a multi-instruction sequence; pmin/pmax are single instructions with the
+// C-style "a < b ? a : b" behaviour that graphics code actually wants.
+// The tradeoff is that NaN handling is unspecified here and differs from the DirectXMath backend
+// (whose _mm_min_ps/_mm_max_ps have their own third behaviour). A NaN reaching these is already a
+// bug upstream; none of the four is safe to lean on for NaN scrubbing on either backend.
 VX_MATH_FORCEINLINE Vector Vector::Clamp(Vector min, Vector max) const noexcept
 {
-    return Vector{ wasm_f32x4_min(wasm_f32x4_max(data, min.data), max.data) };
+    return Vector{ wasm_f32x4_pmin(wasm_f32x4_pmax(data, min.data), max.data) };
 }
 
 VX_MATH_FORCEINLINE Vector Vector::Saturate() const noexcept
 {
-    return Vector{ wasm_f32x4_min(wasm_f32x4_max(data, wasm_f32x4_splat(0.0f)), wasm_f32x4_splat(1.0f)) };
+    return Vector{ wasm_f32x4_pmin(wasm_f32x4_pmax(data, wasm_f32x4_splat(0.0f)),
+                                   wasm_f32x4_splat(1.0f)) };
 }
 
 VX_MATH_FORCEINLINE Vector Vector::Abs() const noexcept
@@ -332,12 +341,12 @@ VX_MATH_FORCEINLINE Vector Vector::Abs() const noexcept
 
 VX_MATH_FORCEINLINE Vector Vector::Min(Vector other) const noexcept
 {
-    return Vector{ wasm_f32x4_min(data, other.data) };
+    return Vector{ wasm_f32x4_pmin(data, other.data) };
 }
 
 VX_MATH_FORCEINLINE Vector Vector::Max(Vector other) const noexcept
 {
-    return Vector{ wasm_f32x4_max(data, other.data) };
+    return Vector{ wasm_f32x4_pmax(data, other.data) };
 }
 
 // No native SIMD pow in WASM SIMD128 - per-lane std::pow. Not remotely as
@@ -400,28 +409,32 @@ VX_MATH_FORCEINLINE Vector ToVector(const Float4& in) noexcept
     return Vector{ wasm_f32x4_make(in.x, in.y, in.z, in.w) };
 }
 
-template<>
-VX_MATH_FORCEINLINE Float2 FromVector<Float2>(Vector vec) noexcept
+namespace detail
 {
-    return Float2(wasm_f32x4_extract_lane(vec.Data(), 0), wasm_f32x4_extract_lane(vec.Data(), 1));
-}
+    VX_MATH_FORCEINLINE FromVectorProxy::operator Float2() const noexcept
+    {
+        Float2 result;
+        wasm_v128_store64_lane(&result, vec.Data(), 0);
+        return result;
+    }
 
-template<>
-VX_MATH_FORCEINLINE Float3 FromVector<Float3>(Vector vec) noexcept
-{
-    return Float3(wasm_f32x4_extract_lane(vec.Data(), 0),
-                  wasm_f32x4_extract_lane(vec.Data(), 1),
-                  wasm_f32x4_extract_lane(vec.Data(), 2));
-}
+    VX_MATH_FORCEINLINE FromVectorProxy::operator Float3() const noexcept
+    {
+        // there is no wasm_f32x4_store3_lane, so we have to extract each lane individually (unsurprisingly)
+        // this is still potentially one less instruction than doing lane-by-lane stores though
+        Float3 result;
+        wasm_v128_store64_lane(&result, vec.Data(), 0);
+        wasm_v128_store32_lane(&result.z, vec.Data(), 2);
+        return result;
+    }
 
-template<>
-VX_MATH_FORCEINLINE Float4 FromVector<Float4>(Vector vec) noexcept
-{
-    return Float4(wasm_f32x4_extract_lane(vec.Data(), 0),
-                  wasm_f32x4_extract_lane(vec.Data(), 1),
-                  wasm_f32x4_extract_lane(vec.Data(), 2),
-                  wasm_f32x4_extract_lane(vec.Data(), 3));
-}
+    VX_MATH_FORCEINLINE FromVectorProxy::operator Float4() const noexcept
+    {
+        Float4 result;
+        wasm_v128_store(&result, vec.Data());
+        return result;
+    }
+} // namespace detail
 
 // ================================
 // SIMD Matrix Implementation (WASM SIMD128)
@@ -463,33 +476,6 @@ VX_MATH_FORCEINLINE Matrix::Matrix(Vector row0, Vector row1, Vector row2, Vector
 {
 }
 
-VX_MATH_FORCEINLINE Matrix::Matrix(const Matrix& other) noexcept
-    : data{ other.data[0], other.data[1], other.data[2], other.data[3] }
-{
-}
-
-VX_MATH_FORCEINLINE Matrix::Matrix(Matrix&& other) noexcept
-    : data{ other.data[0], other.data[1], other.data[2], other.data[3] }
-{
-}
-
-VX_MATH_FORCEINLINE Matrix& Matrix::operator=(const Matrix& other) noexcept
-{
-    if (this != &other)
-    {
-        data[0] = other.data[0];
-        data[1] = other.data[1];
-        data[2] = other.data[2];
-        data[3] = other.data[3];
-    }
-    return *this;
-}
-
-VX_MATH_FORCEINLINE Matrix& Matrix::operator=(Matrix&& other) noexcept
-{
-    return (*this = other); // trivially-copyable payload, plain copy is the move
-}
-
 VX_MATH_FORCEINLINE Vector Matrix::GetRow(size_t index) const noexcept
 {
     return Vector{ data[index] };
@@ -500,46 +486,68 @@ VX_MATH_FORCEINLINE void Matrix::SetRow(size_t index, Vector row) noexcept
     data[index] = row.Data();
 }
 
-// NOTE: wasm_f32x4_extract_lane/replace_lane require a *compile-time
-// constant* lane index (it's encoded as an immediate in the instruction),
-// so runtime row/col indices below go through a local array (store/load)
-// instead - the same trick the DirectX backend uses via reinterpret_cast.
+// wasm_f32x4_extract_lane/replace_lane encode the lane as an instruction immediate, so they need a
+// compile-time constant. Dispatching over the four constants keeps the value in a register; the
+// obvious alternative - storing the row to a local array and indexing it - cannot be promoted out
+// of memory when the index is a runtime value, so it pays a full store/load round trip every call.
+namespace detail
+{
+    VX_MATH_FORCEINLINE float ExtractLane(v128_t vec, size_t lane) noexcept
+    {
+        switch (lane)
+        {
+        case 0:
+            return wasm_f32x4_extract_lane(vec, 0);
+        case 1:
+            return wasm_f32x4_extract_lane(vec, 1);
+        case 2:
+            return wasm_f32x4_extract_lane(vec, 2);
+        default:
+            return wasm_f32x4_extract_lane(vec, 3);
+        }
+    }
+
+    VX_MATH_FORCEINLINE v128_t ReplaceLane(v128_t vec, size_t lane, float value) noexcept
+    {
+        switch (lane)
+        {
+        case 0:
+            return wasm_f32x4_replace_lane(vec, 0, value);
+        case 1:
+            return wasm_f32x4_replace_lane(vec, 1, value);
+        case 2:
+            return wasm_f32x4_replace_lane(vec, 2, value);
+        default:
+            return wasm_f32x4_replace_lane(vec, 3, value);
+        }
+    }
+} // namespace detail
+
 VX_MATH_FORCEINLINE Vector Matrix::GetColumn(size_t index) const noexcept
 {
-    alignas(16) float r0[4], r1[4], r2[4], r3[4];
-    wasm_v128_store(r0, data[0]);
-    wasm_v128_store(r1, data[1]);
-    wasm_v128_store(r2, data[2]);
-    wasm_v128_store(r3, data[3]);
-    return Vector{ r0[index], r1[index], r2[index], r3[index] };
+    return Vector{ detail::ExtractLane(data[0], index),
+                   detail::ExtractLane(data[1], index),
+                   detail::ExtractLane(data[2], index),
+                   detail::ExtractLane(data[3], index) };
 }
 
 VX_MATH_FORCEINLINE void Matrix::SetColumn(size_t index, Vector column) noexcept
 {
-    alignas(16) float col[4];
-    wasm_v128_store(col, column.Data());
-    for (int r = 0; r < 4; ++r)
-    {
-        alignas(16) float lanes[4];
-        wasm_v128_store(lanes, data[r]);
-        lanes[index] = col[r];
-        data[r] = wasm_v128_load(lanes);
-    }
+    const v128_t columnData = column.Data();
+    data[0] = detail::ReplaceLane(data[0], index, wasm_f32x4_extract_lane(columnData, 0));
+    data[1] = detail::ReplaceLane(data[1], index, wasm_f32x4_extract_lane(columnData, 1));
+    data[2] = detail::ReplaceLane(data[2], index, wasm_f32x4_extract_lane(columnData, 2));
+    data[3] = detail::ReplaceLane(data[3], index, wasm_f32x4_extract_lane(columnData, 3));
 }
 
 VX_MATH_FORCEINLINE float Matrix::operator[](size_t row, size_t col) const noexcept
 {
-    alignas(16) float lanes[4];
-    wasm_v128_store(lanes, data[row]);
-    return lanes[col];
+    return detail::ExtractLane(data[row], col);
 }
 
 VX_MATH_FORCEINLINE void Matrix::SetElement(size_t row, size_t col, float value) noexcept
 {
-    alignas(16) float lanes[4];
-    wasm_v128_store(lanes, data[row]);
-    lanes[col] = value;
-    data[row] = wasm_v128_load(lanes);
+    data[row] = detail::ReplaceLane(data[row], col, value);
 }
 
 VX_MATH_FORCEINLINE Matrix Matrix::operator+(const Matrix& rhs) const noexcept
@@ -656,26 +664,99 @@ VX_MATH_FORCEINLINE Matrix Matrix::Transpose() const noexcept
                    wasm_i32x4_shuffle(tmp2, tmp3, 2, 3, 6, 7) };
 }
 
+// Cofactor expansion over the transpose, ported from XMMatrixInverse in DirectXMath
+// (MIT-licensed, Microsoft; see DirectXMathMatrix.inl in the Windows SDK). Replaces a scalar
+// Gauss-Jordan elimination: branch-free, no stack round trip, and shares the algorithm with the
+// DirectX backend so the two agree closely. The generic path there is written in terms of
+// XMVectorSwizzle/XMVectorPermute, whose lane encodings map exactly onto wasm_i32x4_shuffle -
+// a two-source permute indexes the second operand with 4..7, same as wasm.
+//
+// Singular input is NOT special-cased: the determinant reciprocal becomes an infinity and the
+// result fills with infinities and NaNs. Check Determinant() first if that matters.
 VX_MATH_FORCEINLINE Matrix Matrix::Inverse() const noexcept
 {
-    alignas(16) float m[4][4];
-    wasm_v128_store(m[0], data[0]);
-    wasm_v128_store(m[1], data[1]);
-    wasm_v128_store(m[2], data[2]);
-    wasm_v128_store(m[3], data[3]);
+    const Matrix transposed = Transpose();
+    const v128_t mt0 = transposed.data[0];
+    const v128_t mt1 = transposed.data[1];
+    const v128_t mt2 = transposed.data[2];
+    const v128_t mt3 = transposed.data[3];
 
-    float inv[4][4];
-    if (!detail::InvertMatrix4x4(m, inv))
-    {
-        // Mirrors DirectXMath's XMMatrixInverse behavior on a singular
-        // (zero-determinant) matrix: all elements become +infinity.
-        v128_t inf = wasm_f32x4_splat(std::numeric_limits<float>::infinity());
-        return Matrix{ inf, inf, inf, inf };
-    }
+    v128_t d0 = wasm_f32x4_mul(wasm_i32x4_shuffle(mt2, mt2, 0, 0, 1, 1),
+                               wasm_i32x4_shuffle(mt3, mt3, 2, 3, 2, 3));
+    v128_t d1 = wasm_f32x4_mul(wasm_i32x4_shuffle(mt0, mt0, 0, 0, 1, 1),
+                               wasm_i32x4_shuffle(mt1, mt1, 2, 3, 2, 3));
+    v128_t d2 = wasm_f32x4_mul(wasm_i32x4_shuffle(mt2, mt0, 0, 2, 4, 6),
+                               wasm_i32x4_shuffle(mt3, mt1, 1, 3, 5, 7));
 
-    return Matrix{
-        wasm_v128_load(inv[0]), wasm_v128_load(inv[1]), wasm_v128_load(inv[2]), wasm_v128_load(inv[3])
-    };
+    d0 = detail::NegMulAdd(wasm_i32x4_shuffle(mt2, mt2, 2, 3, 2, 3),
+                           wasm_i32x4_shuffle(mt3, mt3, 0, 0, 1, 1),
+                           d0);
+    d1 = detail::NegMulAdd(wasm_i32x4_shuffle(mt0, mt0, 2, 3, 2, 3),
+                           wasm_i32x4_shuffle(mt1, mt1, 0, 0, 1, 1),
+                           d1);
+    d2 = detail::NegMulAdd(wasm_i32x4_shuffle(mt2, mt0, 1, 3, 5, 7),
+                           wasm_i32x4_shuffle(mt3, mt1, 0, 2, 4, 6),
+                           d2);
+
+    const v128_t v00 = wasm_i32x4_shuffle(mt1, mt1, 1, 2, 0, 1);
+    const v128_t v10 = wasm_i32x4_shuffle(d0, d2, 5, 1, 3, 0);
+    const v128_t v01 = wasm_i32x4_shuffle(mt0, mt0, 2, 0, 1, 0);
+    const v128_t v11 = wasm_i32x4_shuffle(d0, d2, 3, 5, 1, 2);
+    const v128_t v02 = wasm_i32x4_shuffle(mt3, mt3, 1, 2, 0, 1);
+    const v128_t v12 = wasm_i32x4_shuffle(d1, d2, 7, 1, 3, 0);
+    const v128_t v03 = wasm_i32x4_shuffle(mt2, mt2, 2, 0, 1, 0);
+    const v128_t v13 = wasm_i32x4_shuffle(d1, d2, 3, 7, 1, 2);
+
+    v128_t c0 = wasm_f32x4_mul(v00, v10);
+    v128_t c2 = wasm_f32x4_mul(v01, v11);
+    v128_t c4 = wasm_f32x4_mul(v02, v12);
+    v128_t c6 = wasm_f32x4_mul(v03, v13);
+
+    const v128_t v20 = wasm_i32x4_shuffle(mt1, mt1, 2, 3, 1, 2);
+    const v128_t v30 = wasm_i32x4_shuffle(d0, d2, 3, 0, 1, 4);
+    const v128_t v21 = wasm_i32x4_shuffle(mt0, mt0, 3, 2, 3, 1);
+    const v128_t v31 = wasm_i32x4_shuffle(d0, d2, 2, 1, 4, 0);
+    const v128_t v22 = wasm_i32x4_shuffle(mt3, mt3, 2, 3, 1, 2);
+    const v128_t v32 = wasm_i32x4_shuffle(d1, d2, 3, 0, 1, 6);
+    const v128_t v23 = wasm_i32x4_shuffle(mt2, mt2, 3, 2, 3, 1);
+    const v128_t v33 = wasm_i32x4_shuffle(d1, d2, 2, 1, 6, 0);
+
+    c0 = detail::NegMulAdd(v20, v30, c0);
+    c2 = detail::NegMulAdd(v21, v31, c2);
+    c4 = detail::NegMulAdd(v22, v32, c4);
+    c6 = detail::NegMulAdd(v23, v33, c6);
+
+    const v128_t v40 = wasm_i32x4_shuffle(mt1, mt1, 3, 0, 3, 0);
+    const v128_t v50 = wasm_i32x4_shuffle(d0, d2, 2, 5, 4, 2);
+    const v128_t v41 = wasm_i32x4_shuffle(mt0, mt0, 1, 3, 0, 2);
+    const v128_t v51 = wasm_i32x4_shuffle(d0, d2, 5, 0, 3, 4);
+    const v128_t v42 = wasm_i32x4_shuffle(mt3, mt3, 3, 0, 3, 0);
+    const v128_t v52 = wasm_i32x4_shuffle(d1, d2, 2, 7, 6, 2);
+    const v128_t v43 = wasm_i32x4_shuffle(mt2, mt2, 1, 3, 0, 2);
+    const v128_t v53 = wasm_i32x4_shuffle(d1, d2, 7, 0, 3, 6);
+
+    const v128_t c1 = detail::NegMulAdd(v40, v50, c0);
+    c0 = detail::MulAdd(v40, v50, c0);
+    const v128_t c3 = detail::MulAdd(v41, v51, c2);
+    c2 = detail::NegMulAdd(v41, v51, c2);
+    const v128_t c5 = detail::NegMulAdd(v42, v52, c4);
+    c4 = detail::MulAdd(v42, v52, c4);
+    const v128_t c7 = detail::MulAdd(v43, v53, c6);
+    c6 = detail::NegMulAdd(v43, v53, c6);
+
+    // interleave the even/odd cofactor halves: lanes 0 and 2 from the first, 1 and 3 from the second
+    const v128_t row0 = wasm_i32x4_shuffle(c0, c1, 0, 5, 2, 7);
+    const v128_t row1 = wasm_i32x4_shuffle(c2, c3, 0, 5, 2, 7);
+    const v128_t row2 = wasm_i32x4_shuffle(c4, c5, 0, 5, 2, 7);
+    const v128_t row3 = wasm_i32x4_shuffle(c6, c7, 0, 5, 2, 7);
+
+    const v128_t determinant = Vector{ row0 }.DotVec<4>(Vector{ mt0 }).Data();
+    const v128_t reciprocal = wasm_f32x4_div(wasm_f32x4_splat(1.0f), determinant);
+
+    return Matrix{ wasm_f32x4_mul(row0, reciprocal),
+                   wasm_f32x4_mul(row1, reciprocal),
+                   wasm_f32x4_mul(row2, reciprocal),
+                   wasm_f32x4_mul(row3, reciprocal) };
 }
 
 VX_MATH_FORCEINLINE float Matrix::Determinant() const noexcept
@@ -776,12 +857,43 @@ VX_MATH_FORCEINLINE Matrix Matrix::RotationQuaternion(Vector quaternion) noexcep
     };
 }
 
+// Analytical S * R * T rather than three matrix constructions and two 4x4 multiplies.
+// Because S is diagonal, (S * R) is just each rotation row scaled by one scale component;
+// and because rows 0-2 of a rotation matrix have w == 0, the * T step leaves those rows
+// untouched and simply drops the translation into row 3. Three multiplies and a lane
+// write, versus ~90 emitted instructions - and more accurate, since the general path
+// accumulates rounding through dot products whose terms are almost all exact zeros.
 VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Vector rotation_quaternion, Vector scale) noexcept
 {
-    Matrix scale_matrix = Matrix::Scale(scale);
-    Matrix rotation_matrix = Matrix::RotationQuaternion(rotation_quaternion);
-    Matrix translation_matrix = Matrix::Translation(translation);
-    return (scale_matrix * rotation_matrix) * translation_matrix;
+    const Matrix rotation = Matrix::RotationQuaternion(rotation_quaternion);
+    const v128_t scaleData = scale.Data();
+
+    return Matrix{ wasm_f32x4_mul(rotation.data[0], wasm_i32x4_shuffle(scaleData, scaleData, 0, 0, 0, 0)),
+                   wasm_f32x4_mul(rotation.data[1], wasm_i32x4_shuffle(scaleData, scaleData, 1, 1, 1, 1)),
+                   wasm_f32x4_mul(rotation.data[2], wasm_i32x4_shuffle(scaleData, scaleData, 2, 2, 2, 2)),
+                   wasm_f32x4_replace_lane(translation.Data(), 3, 1.0f) };
+}
+
+// Rotating about rotation_origin instead of the local origin leaves the linear part
+// identical and only shifts the translation row: p * S * R + (t + Ro - Ro * R), where
+// Ro passes through the *unscaled* rotation.
+VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation,
+                                       Vector rotation_quaternion,
+                                       Vector scale,
+                                       Vector rotation_origin) noexcept
+{
+    const Matrix rotation = Matrix::RotationQuaternion(rotation_quaternion);
+    const v128_t scaleData = scale.Data();
+    const v128_t originData = wasm_f32x4_replace_lane(rotation_origin.Data(), 3, 0.0f);
+    const v128_t rotatedOrigin = detail::MulRowByMatrix(originData, rotation.data);
+
+    v128_t translationRow = wasm_f32x4_add(translation.Data(), wasm_f32x4_sub(originData, rotatedOrigin));
+    translationRow = wasm_f32x4_replace_lane(translationRow, 3, 1.0f);
+
+    return Matrix{ wasm_f32x4_mul(rotation.data[0], wasm_i32x4_shuffle(scaleData, scaleData, 0, 0, 0, 0)),
+                   wasm_f32x4_mul(rotation.data[1], wasm_i32x4_shuffle(scaleData, scaleData, 1, 1, 1, 1)),
+                   wasm_f32x4_mul(rotation.data[2], wasm_i32x4_shuffle(scaleData, scaleData, 2, 2, 2, 2)),
+                   translationRow };
 }
 
 VX_MATH_FORCEINLINE Matrix Matrix::LookAt(Vector eye, Vector target, Vector up) noexcept
@@ -940,28 +1052,30 @@ VX_MATH_FORCEINLINE Vector Transform(Vector vector, Matrix matrix) noexcept
     {
         // TransformCoord semantics: treat vector as a point (w=1 going in),
         // then perspective-divide by the resulting w.
-        alignas(16) float lanes[4];
-        wasm_v128_store(lanes, vector.Data());
-        lanes[3] = 1.0f;
+        // Use wasm_f32x4_replace_lane as needed based on dims
+        v128_t data = vector.Data();
         if constexpr (N == 2)
         {
-            lanes[2] = 0.0f;
+            data = wasm_f32x4_replace_lane(data, 2, 0.0f);
+            data = wasm_f32x4_replace_lane(data, 3, 1.0f);
         }
-        Vector point{ wasm_v128_load(lanes) };
-        Vector result = matrix * point;
-        float invW = 1.0f / result.w();
-        return result * invW;
+        else if constexpr (N == 3)
+        {
+            data = wasm_f32x4_replace_lane(data, 3, 1.0f);
+        }
+        // perspective divide stays in the vector domain - splat w across all lanes and divide,
+        // rather than extracting it to a scalar and re-splatting the reciprocal
+        const v128_t transformed = (matrix * Vector{ data }).Data();
+        return Vector{ wasm_f32x4_div(transformed,
+                                      wasm_i32x4_shuffle(transformed, transformed, 3, 3, 3, 3)) };
     }
 }
 
 VX_MATH_FORCEINLINE Vector TransformNormal(Vector normal, Matrix matrix) noexcept
 {
     // Directions transform by the upper-left 3x3 only (w forced to 0 so
-    // translation doesn't leak in).
-    alignas(16) float lanes[4];
-    wasm_v128_store(lanes, normal.Data());
-    lanes[3] = 0.0f;
-    return matrix * Vector{ wasm_v128_load(lanes) };
+    // translation doesn't leak in). use replace_lane again to zero out the w lane
+    return matrix * Vector{ wasm_f32x4_replace_lane(normal.Data(), 3, 0.0f) };
 }
 
 VX_MATH_FORCEINLINE Matrix operator*(float scalar, const Matrix& mat) noexcept
@@ -997,49 +1111,53 @@ VX_MATH_FORCEINLINE Matrix ToMatrix(const Float4x4& storage) noexcept
                    wasm_f32x4_make(m[3][0], m[3][1], m[3][2], m[3][3]) };
 }
 
+// Storing whole rows, rather than reading element by element. Matrix::operator[] takes a
+// runtime column index, so every one of those reads costs a full row store to the stack plus
+// a scalar load; sixteen of them is sixteen round trips where four vector stores will do.
+// The three-wide storage types have a row stride of 3 floats, so they take a 64-bit plus a
+// 32-bit lane store per row instead of one 128-bit store.
+namespace detail
+{
+    VX_MATH_FORCEINLINE void StoreRowXYZ(float* dest, v128_t row) noexcept
+    {
+        wasm_v128_store64_lane(dest, row, 0);
+        wasm_v128_store32_lane(dest + 2, row, 2);
+    }
+} // namespace detail
+
 template<>
 VX_MATH_FORCEINLINE Float3x3 FromMatrix(const Matrix& mat) noexcept
 {
-    return Float3x3(
-        mat[0, 0], mat[0, 1], mat[0, 2], mat[1, 0], mat[1, 1], mat[1, 2], mat[2, 0], mat[2, 1], mat[2, 2]);
+    const Matrix::NativeType rows = mat.Data();
+    Float3x3 result;
+    detail::StoreRowXYZ(&result.Data()[0][0], rows.r[0]);
+    detail::StoreRowXYZ(&result.Data()[1][0], rows.r[1]);
+    detail::StoreRowXYZ(&result.Data()[2][0], rows.r[2]);
+    return result;
 }
 
 template<>
 VX_MATH_FORCEINLINE Float4x3 FromMatrix(const Matrix& mat) noexcept
 {
-    return Float4x3(mat[0, 0],
-                    mat[0, 1],
-                    mat[0, 2],
-                    mat[1, 0],
-                    mat[1, 1],
-                    mat[1, 2],
-                    mat[2, 0],
-                    mat[2, 1],
-                    mat[2, 2],
-                    mat[3, 0],
-                    mat[3, 1],
-                    mat[3, 2]);
+    const Matrix::NativeType rows = mat.Data();
+    Float4x3 result;
+    detail::StoreRowXYZ(&result.Data()[0][0], rows.r[0]);
+    detail::StoreRowXYZ(&result.Data()[1][0], rows.r[1]);
+    detail::StoreRowXYZ(&result.Data()[2][0], rows.r[2]);
+    detail::StoreRowXYZ(&result.Data()[3][0], rows.r[3]);
+    return result;
 }
 
 template<>
 VX_MATH_FORCEINLINE Float4x4 FromMatrix(const Matrix& mat) noexcept
 {
-    return Float4x4(mat[0, 0],
-                    mat[0, 1],
-                    mat[0, 2],
-                    mat[0, 3],
-                    mat[1, 0],
-                    mat[1, 1],
-                    mat[1, 2],
-                    mat[1, 3],
-                    mat[2, 0],
-                    mat[2, 1],
-                    mat[2, 2],
-                    mat[2, 3],
-                    mat[3, 0],
-                    mat[3, 1],
-                    mat[3, 2],
-                    mat[3, 3]);
+    const Matrix::NativeType rows = mat.Data();
+    Float4x4 result;
+    wasm_v128_store(&result.Data()[0][0], rows.r[0]);
+    wasm_v128_store(&result.Data()[1][0], rows.r[1]);
+    wasm_v128_store(&result.Data()[2][0], rows.r[2]);
+    wasm_v128_store(&result.Data()[3][0], rows.r[3]);
+    return result;
 }
 
 } // namespace velox::math

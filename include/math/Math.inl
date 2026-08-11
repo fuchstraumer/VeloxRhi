@@ -509,6 +509,13 @@ constexpr Float4x4 Float4x4::Zero() noexcept
     );
 }
 
+// Backend-agnostic: the proxy just carries the Vector until a conversion operator picks the
+// destination width. Those operators are the part that needs SIMD, and live in the backend .inl
+VX_MATH_FORCEINLINE detail::FromVectorProxy FromVector(Vector vec) noexcept
+{
+    return detail::FromVectorProxy{ vec };
+}
+
 // ================================
 // Storage-Matrix * Storage-Vector free functions
 // ================================
@@ -585,6 +592,7 @@ constexpr Float3 operator*(const Float4x4& mat, const Float3& vec) noexcept
 // ============================================================================
 // Backend dispatch - Vector/Matrix implementations
 // ============================================================================
+// C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\DirectXMath.h
 #if VX_MATH_BACKEND_WASM
     #include "math/MathBackendWASM.inl"
 #else

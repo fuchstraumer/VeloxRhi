@@ -25,6 +25,7 @@ if (MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # /bigobj: Increases number of sections in .obj (slang can bump into this ime)
     # /arch:AVX2: Enables AVX2 instructions
     add_compile_options(/MP /bigobj /arch:AVX2 /Gy)
+    add_compile_definitions(_HAS_EXCEPTIONS=0)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # Clang specific flags
     if (NOT EMSCRIPTEN)
@@ -111,6 +112,7 @@ set(VeloxRhi_Headers
     "${CMAKE_CURRENT_SOURCE_DIR}/include/VeloxErrors.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/math/Math.inl"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathHashes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/MeshGenerator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/SlotMap.hpp")
 
 # append corrent Math.inl backend based on platform
@@ -129,14 +131,25 @@ set(VeloxRhi_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Future.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/InputManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Scheduler.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ShaderUtils.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ShaderUtils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/utility/MeshGenerator.cpp")
+
 
 # todo-ship: Need to fix dxil.dll and related friends not copying to .exe output dir on Windows
 add_library(VeloxRhi STATIC ${VeloxRhi_SOURCES} ${VeloxRhi_Headers} ${OCEAN_FFT_GENERATED_OUTPUTS})
 target_include_directories(VeloxRhi PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/backends
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace
     ${CMAKE_CURRENT_BINARY_DIR}/generated)
+
+# add mikktspace source, should run through C compiler
+set(VeloxRHI_mikktspace_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace/mikktspace.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace/mikktspace.c")
+
+target_sources(VeloxRhi PRIVATE ${VeloxRHI_mikktspace_SOURCES})
 
 if (NOT EMSCRIPTEN)
     target_include_directories(VeloxRhi PUBLIC
@@ -144,6 +157,22 @@ if (NOT EMSCRIPTEN)
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dawn/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/slang/include)
 endif()
+# NOTE: relaxed-simd does not degrade gracefully. The opcodes are required at compile time, and a
+# module containing them fails validation outright on an engine without support - it does not fall
+# back to mul+add at runtime. Chrome 114+ / Firefox 120+ / Safari 18+ are fine; older Safari and
+# older mobile browsers will refuse to instantiate the module. Turn this OFF to widen support.
+option(VELOX_RHI_MATH_RELAXED_SIMD "Use wasm relaxed-simd FMA in velox::math" ON)
+
+if (EMSCRIPTEN)
+    # PUBLIC, not PRIVATE: the math backend is header-only inline code instantiated both in this
+    # library's own TUs and in every consumer's, so both sides must agree on the SIMD feature set
+    target_compile_options(VeloxRhi PUBLIC -msimd128)
+    if (VELOX_RHI_MATH_RELAXED_SIMD)
+        target_compile_options(VeloxRhi PUBLIC -mrelaxed-simd)
+        target_compile_definitions(VeloxRhi PUBLIC VX_MATH_RELAXED_FMA)
+    endif()
+endif()
+
 # set required definition for imgui backend (dawn)
 target_compile_definitions(VeloxRhi PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
 if (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")

@@ -40,12 +40,16 @@
     #include <DirectXMath.h>
 #endif
 
-// Define VX_MATH_RELAXED_FMA to use relaxed-simd fused multiply-add
-// (wasm_f32x4_relaxed_madd / relaxed_nmadd) on the WASM backend.
-// this is mostly fully supported across browsers, but not 100% yet
+// VX_MATH_RELAXED_FMA selects relaxed-simd fused multiply-add
+// (wasm_f32x4_relaxed_madd / relaxed_nmadd) on the WASM backend. Defined by the
+// VELOX_RHI_MATH_RELAXED_SIMD CMake option, which also passes -mrelaxed-simd -
+// the builtins do not compile without that flag, so never define this by hand.
+// this is mostly fully supported across browsers, but not 100% yet, so it's off by default
 // todo-ship: consider adding a runtime check for relaxed-simd support, and
-// using that to select the backend at runtime. For now, just leave it disabled
-#define VX_MATH_RELAXED_FMA
+// using that to select the backend at runtime
+// Use analytical solutions and approximations in key locations to reduce
+// instruction count (called SHORTCUTS because there's a few diff types of opts, not just approximation)
+#define VX_MATH_USE_SHORTCUTS
 
 namespace velox::math
 {
@@ -376,9 +380,12 @@ public:
     template<int N>
     float LengthSq() const noexcept;
 
-    // Cross product only makes sense for 3D vectors
     Vector Cross(Vector other) const noexcept;
 
+    template<int N>
+    Vector DotVec(Vector other) const noexcept;
+    
+    // Scalar dot product will involve at least one extra instruction. Favor vector returning Dot<N>
     template<int N>
     float Dot(Vector other) const noexcept;
 
@@ -661,10 +668,13 @@ public:
     // Construct from row vectors
     Matrix(Vector row0, Vector row1, Vector row2, Vector row3) noexcept;
 
-    Matrix(const Matrix& other) noexcept;
-    Matrix(Matrix&& other) noexcept;
-    Matrix& operator=(const Matrix& other) noexcept;
-    Matrix& operator=(Matrix&& other) noexcept;
+    // Defaulted deliberately: the payload is 64 bytes of trivially-copyable SIMD registers, so a
+    // hand-written copy buys nothing and a self-assignment guard is pure cost. Keeping these
+    // defaulted also keeps Matrix trivially copyable
+    Matrix(const Matrix& other) noexcept = default;
+    Matrix(Matrix&& other) noexcept = default;
+    Matrix& operator=(const Matrix& other) noexcept = default;
+    Matrix& operator=(Matrix&& other) noexcept = default;
 
     // Native SIMD interop
 #if VX_MATH_BACKEND_WASM
@@ -705,8 +715,9 @@ public:
 
     // Matrix operations
     Matrix Transpose() const noexcept;
-    // Returns a matrix of +infinity in every element if the matrix is singular
-    // (mirrors DirectXMath's XMMatrixInverse behavior on a zero determinant).
+    // Cofactor expansion, branch-free, with no special case for a singular matrix: a zero
+    // determinant yields a result full of infinities and NaNs rather than an error. Call
+    // Determinant() first if the input might be singular.
     Matrix Inverse() const noexcept;
     float Determinant() const noexcept;
 
@@ -724,8 +735,21 @@ public:
     static Matrix RotationAxis(Vector axis, float radians) noexcept;
     static Matrix RotationQuaternion(Vector quaternion) noexcept;
 
-    // Combined transformations
+    // Composes scale, then rotation, then translation - the order the name lists them in, and the
+    // order they are applied to a row vector (v * S * R * T). Non-uniform scale therefore acts in
+    // the object's *local* frame, so the scale axes rotate with the object; that matches glTF,
+    // DirectXMath, and every major engine (they write it T * R * S because they put the vector on
+    // the other side of the matrix, which is the same transform).
+    // The quaternion is assumed to be unit-length - a non-unit quaternion silently yields a scaled
+    // and skewed rotation rather than an error.
     static Matrix TRS(Vector translation, Vector rotation_quaternion, Vector scale) noexcept;
+    // As above, but rotation happens about rotation_origin instead of the local origin. Only the
+    // translation row differs, so this costs a handful of extra instructions over the three-argument
+    // form. Rarely needed: in a parented hierarchy the parent transform already acts as the pivot.
+    static Matrix TRS(Vector translation,
+                      Vector rotation_quaternion,
+                      Vector scale,
+                      Vector rotation_origin) noexcept;
     // NOTE: LookAt/LookTo default to a right-handed view space, while
     // Perspective/Orthographic below default to left-handed projections.
     // That mismatch was already present in the source this was ported
@@ -843,29 +867,18 @@ Vector ToVector(const Float3& storage) noexcept;
  */
 Vector ToVector(const Float4& storage) noexcept;
 
-template<typename T>
-T FromVector(Vector vec) noexcept;
+namespace detail
+{
+    struct FromVectorProxy
+    {
+        Vector vec;
+        operator Float2() const noexcept;
+        operator Float3() const noexcept;
+        operator Float4() const noexcept;
+    };
+}
 
-/**
- * @brief Convert SIMD Vector to Float2 storage type
- * Use this function at the END of mathematical operations to convert back to storage format
- */
-template<>
-Float2 FromVector<Float2>(Vector vec) noexcept;
-
-/**
- * @brief Convert SIMD Vector to Float3 storage type
- * Use this function at the END of mathematical operations to convert back to storage format
- */
-template<>
-Float3 FromVector<Float3>(Vector vec) noexcept;
-
-/**
- * @brief Convert SIMD Vector to Float4 storage type
- * Use this function at the END of mathematical operations to convert back to storage format
- */
-template<>
-Float4 FromVector<Float4>(Vector vec) noexcept;
+detail::FromVectorProxy FromVector(Vector vec) noexcept;
 
 #undef SWIZZLE_2
 #undef SWIZZLE_3
