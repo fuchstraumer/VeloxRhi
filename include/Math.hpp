@@ -71,6 +71,8 @@ namespace velox::math
 struct Float3;
 struct Float4;
 struct Vector;
+struct VectorMask;
+struct Quaternion;
 struct Float3x3;
 struct Float4x3;
 struct Float4x4;
@@ -530,6 +532,117 @@ private:
 };
 
 /**
+ * Unit quaternion representing a rotation, laid out (x, y, z, w) with w the scalar part.
+ *
+ * A distinct type rather than a Vector carrying a convention in its head. The conversion is
+ * deliberately one-way - implicit *to* Vector for interop and storage, explicit *from* it - which
+ * means a position can never be passed where a rotation is expected. TRS takes four same-typed
+ * arguments and a silent swap there produces a plausible-looking wrong matrix, so the type is doing
+ * real work. It also puts Identity() somewhere (0,0,0,1) is the right answer; Vector::Identity() is
+ * (1,1,1,1) and is not what you want for a rotation.
+ *
+ * Every operation assumes unit length. Non-unit quaternions still "work" but encode a rotation
+ * composed with a scale, which is almost never intended - Normalize() after any accumulation.
+ */
+struct alignas(16) Quaternion
+{
+public:
+    /** @brief The identity rotation, (0, 0, 0, 1) */
+    Quaternion() noexcept;
+    Quaternion(float x, float y, float z, float w) noexcept;
+    explicit Quaternion(Vector vec) noexcept;
+
+#if VX_MATH_BACKEND_WASM
+    explicit Quaternion(v128_t vec) noexcept : data{vec} {}
+    v128_t Data() const noexcept { return data; }
+#else
+    explicit Quaternion(DirectX::XMVECTOR vec) noexcept : data{vec} {}
+    DirectX::XMVECTOR Data() const noexcept { return data; }
+#endif
+
+    Quaternion(const Quaternion& other) noexcept = default;
+    Quaternion(Quaternion&& other) noexcept = default;
+    Quaternion& operator=(const Quaternion& other) noexcept = default;
+    Quaternion& operator=(Quaternion&& other) noexcept = default;
+
+    /** @brief Implicit, so a Quaternion can be stored or fed to Vector-taking interop unchanged */
+    operator Vector() const noexcept;
+
+    /** @note Accessing a single scalar value in this type is comparatively slow */
+    float x() const noexcept;
+    /** @note Accessing a single scalar value in this type is comparatively slow */
+    float y() const noexcept;
+    /** @note Accessing a single scalar value in this type is comparatively slow */
+    float z() const noexcept;
+    /** @note Accessing a single scalar value in this type is comparatively slow */
+    float w() const noexcept;
+
+    /**
+     * @brief Composition. **This rotation is applied first, then `second`.**
+     *
+     * That is the DirectXMath XMQuaternionMultiply order, and the opposite of how the equivalent
+     * mathematical product q1*q2 is usually read. Deliberately a named method rather than operator*
+     * so the order has somewhere to be documented - getting it backwards yields rotations that look
+     * fine in isolation and only go wrong once they compose.
+     */
+    Quaternion Multiply(Quaternion second) const noexcept;
+
+    /** @brief Negates the vector part. For a unit quaternion this is also the inverse */
+    Quaternion Conjugate() const noexcept;
+    /** @brief Conjugate divided by squared length, so it is correct for non-unit quaternions too */
+    Quaternion Inverse() const noexcept;
+    Quaternion Normalize() const noexcept;
+
+    float Dot(Quaternion other) const noexcept;
+    float Length() const noexcept;
+    float LengthSq() const noexcept;
+
+    bool IsIdentity() const noexcept;
+
+    /** @brief Rotates a 3-vector by this rotation. w of the input is ignored, and zero on output.
+     *  @note This choice enables a more instruction-efficient impl, but be aware that it is *not* a 4D 
+     *  rotation. If you need to rotate a 4D vector, use Matrix::RotationQuaternion(*this) and
+     *  multiply the vector by that matrix instead.
+     */
+    Vector RotateVector(Vector vec) const noexcept;
+
+    /** @brief Equivalent to Matrix::RotationQuaternion(*this) */
+    Matrix ToMatrix() const noexcept;
+
+    /** @brief Recovers the axis (normalized) and angle in radians this rotation represents.
+     *  @note This involves some scalar math and is not a pure SIMD operation, so it is comparatively slow.
+     *  Use sparingly.
+     */
+    void ToAxisAngle(Vector& out_axis, float& out_radians) const noexcept;
+
+    static Quaternion Identity() noexcept;
+    /** @brief Rotation of `radians` about `axis`; the axis is normalized for you */
+    static Quaternion RotationAxis(Vector axis, float radians) noexcept;
+    /** @brief As RotationAxis, but assumes `normal_axis` is already unit length */
+    static Quaternion RotationNormal(Vector normal_axis, float radians) noexcept;
+    /**
+     * @brief Euler angles in radians, composed X (pitch), then Y (yaw), then Z (roll).
+     *
+     * @note Composed explicitly on both backends rather than forwarding to DirectXMath,
+     * so the two agree on the order by construction. ToMatrix() on the result equals
+     * RotationX(pitch) * RotationY(yaw) * RotationZ(roll).
+     */
+    static Quaternion RotationRollPitchYaw(float pitch, float yaw, float roll) noexcept;
+    /** @brief Extracts the rotation from a matrix. Assumes the upper-left 3x3 is orthonormal.
+     *  @note Check QuaternionBackend (especially WASM) for more details, but know that this is also
+     *  comparatively slow due to scalarization and branching for correctness/robustness. Use sparingly.
+     */
+    static Quaternion FromMatrix(const Matrix& mat) noexcept;
+
+private:
+#if VX_MATH_BACKEND_WASM
+    v128_t data;
+#else
+    DirectX::XMVECTOR data;
+#endif
+};
+
+/**
  * Matrix3x3 storage type for persistence and interop.
  * @note You cannot perform mathematical operations directly on these types, you
  * must convert them to the SIMD Matrix type first via ToMatrix(). This is an
@@ -845,7 +958,9 @@ public:
     static Matrix RotationY(float radians) noexcept;
     static Matrix RotationZ(float radians) noexcept;
     static Matrix RotationAxis(Vector axis, float radians) noexcept;
-    static Matrix RotationQuaternion(Vector quaternion) noexcept;
+    static Matrix RotationQuaternion(Quaternion rotation) noexcept;
+    /** @brief Euler angles in radians. See Quaternion::RotationRollPitchYaw for the exact order */
+    static Matrix RotationRollPitchYaw(float pitch, float yaw, float roll) noexcept;
 
     // Composes scale, then rotation, then translation - the order the name lists them in, and the
     // order they are applied to a row vector (v * S * R * T). Non-uniform scale therefore acts in
@@ -854,12 +969,12 @@ public:
     // the other side of the matrix, which is the same transform).
     // The quaternion is assumed to be unit-length - a non-unit quaternion silently yields a scaled
     // and skewed rotation rather than an error.
-    static Matrix TRS(Vector translation, Vector rotation_quaternion, Vector scale) noexcept;
+    static Matrix TRS(Vector translation, Quaternion rotation, Vector scale) noexcept;
     // As above, but rotation happens about rotation_origin instead of the local origin. Only the
     // translation row differs, so this costs a handful of extra instructions over the three-argument
     // form. Rarely needed: in a parented hierarchy the parent transform already acts as the pivot.
     static Matrix TRS(Vector translation,
-                      Vector rotation_quaternion,
+                      Quaternion rotation,
                       Vector scale,
                       Vector rotation_origin) noexcept;
     // NOTE: LookAt/LookTo default to a right-handed view space, while

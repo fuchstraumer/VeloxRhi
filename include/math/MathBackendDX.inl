@@ -810,16 +810,22 @@ VX_MATH_FORCEINLINE Matrix Matrix::RotationAxis(Vector axis, float radians) noex
 {
     return Matrix{ DirectX::XMMatrixRotationAxis(axis.Data(), radians) };
 }
-VX_MATH_FORCEINLINE Matrix Matrix::RotationQuaternion(Vector quaternion) noexcept
+VX_MATH_FORCEINLINE Matrix Matrix::RotationQuaternion(Quaternion rotation) noexcept
 {
-    return Matrix{ DirectX::XMMatrixRotationQuaternion(quaternion.Data()) };
+    return Matrix{ DirectX::XMMatrixRotationQuaternion(rotation.Data()) };
+}
+
+// Forwards to the quaternion form so the Euler composition order is defined in exactly one place
+VX_MATH_FORCEINLINE Matrix Matrix::RotationRollPitchYaw(float pitch, float yaw, float roll) noexcept
+{
+    return Matrix::RotationQuaternion(Quaternion::RotationRollPitchYaw(pitch, yaw, roll));
 }
 
 // Written out rather than forwarded to XMMatrixAffineTransformation so that both backends
 // perform the same operations in the same order and agree bit-for-bit. Because S is diagonal
 // and rows 0-2 of a rotation matrix have w == 0, S * R * T reduces to scaling each rotation
 // row and writing the translation into row 3.
-VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Vector rotation_quaternion, Vector scale) noexcept
+VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Quaternion rotation_quaternion, Vector scale) noexcept
 {
     const DirectX::XMMATRIX rotation = DirectX::XMMatrixRotationQuaternion(rotation_quaternion.Data());
     const DirectX::XMVECTOR scaleData = scale.Data();
@@ -834,7 +840,7 @@ VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Vector rotation_quate
 // Rotating about rotation_origin leaves the linear part identical and only shifts the
 // translation row to t + Ro - Ro * R, with Ro passing through the *unscaled* rotation.
 VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation,
-                                       Vector rotation_quaternion,
+                                       Quaternion rotation_quaternion,
                                        Vector scale,
                                        Vector rotation_origin) noexcept
 {
@@ -1045,3 +1051,6 @@ VX_MATH_FORCEINLINE Float4x4 FromMatrix(const Matrix& mat) noexcept
 }
 
 } // namespace velox::math
+
+// Quaternion implementations live in their own file to keep this one navigable
+#include "math/QuaternionBackendDX.inl"

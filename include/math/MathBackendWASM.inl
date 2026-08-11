@@ -1155,9 +1155,9 @@ VX_MATH_FORCEINLINE Matrix Matrix::RotationAxis(Vector axis, float radians) noex
 
 // Standard quaternion-to-matrix, row-vector convention (matches
 // DirectXMath's XMMatrixRotationQuaternion).
-VX_MATH_FORCEINLINE Matrix Matrix::RotationQuaternion(Vector quaternion) noexcept
+VX_MATH_FORCEINLINE Matrix Matrix::RotationQuaternion(Quaternion rotation) noexcept
 {
-    float x = quaternion.x(), y = quaternion.y(), z = quaternion.z(), w = quaternion.w();
+    float x = rotation.x(), y = rotation.y(), z = rotation.z(), w = rotation.w();
 
     return Matrix{
         wasm_f32x4_make(1.0f - 2.0f * (y * y + z * z), 2.0f * (x * y + z * w), 2.0f * (x * z - y * w), 0.0f),
@@ -1167,13 +1167,19 @@ VX_MATH_FORCEINLINE Matrix Matrix::RotationQuaternion(Vector quaternion) noexcep
     };
 }
 
+// Forwards to the quaternion form so the Euler composition order is defined in exactly one place
+VX_MATH_FORCEINLINE Matrix Matrix::RotationRollPitchYaw(float pitch, float yaw, float roll) noexcept
+{
+    return Matrix::RotationQuaternion(Quaternion::RotationRollPitchYaw(pitch, yaw, roll));
+}
+
 // Analytical S * R * T rather than three matrix constructions and two 4x4 multiplies.
 // Because S is diagonal, (S * R) is just each rotation row scaled by one scale component;
 // and because rows 0-2 of a rotation matrix have w == 0, the * T step leaves those rows
 // untouched and simply drops the translation into row 3. Three multiplies and a lane
 // write, versus ~90 emitted instructions - and more accurate, since the general path
 // accumulates rounding through dot products whose terms are almost all exact zeros.
-VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Vector rotation_quaternion, Vector scale) noexcept
+VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Quaternion rotation_quaternion, Vector scale) noexcept
 {
     const Matrix rotation = Matrix::RotationQuaternion(rotation_quaternion);
     const v128_t scaleData = scale.Data();
@@ -1188,7 +1194,7 @@ VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Vector rotation_quate
 // identical and only shifts the translation row: p * S * R + (t + Ro - Ro * R), where
 // Ro passes through the *unscaled* rotation.
 VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation,
-                                       Vector rotation_quaternion,
+                                       Quaternion rotation_quaternion,
                                        Vector scale,
                                        Vector rotation_origin) noexcept
 {
@@ -1471,3 +1477,6 @@ VX_MATH_FORCEINLINE Float4x4 FromMatrix(const Matrix& mat) noexcept
 }
 
 } // namespace velox::math
+
+// Quaternion implementations live in their own file to keep this one navigable
+#include "math/QuaternionBackendWASM.inl"
