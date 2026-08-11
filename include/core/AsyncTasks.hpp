@@ -1,7 +1,7 @@
 #pragma once
 #ifndef VELOX_RHI_ASYNC_TASKS_HPP
 #define VELOX_RHI_ASYNC_TASKS_HPP
-#include "VeloxErrors.hpp"
+#include "common/VeloxErrors.hpp"
 #include "utility/SlotMap.hpp"
 #include <coroutine>
 #include <memory>

@@ -1,5 +1,5 @@
-#include "Context.hpp"
-#include "Application.hpp"
+#include "core/Context.hpp"
+#include "core/Application.hpp"
 #include <cassert>
 #include <string_view>
 #include <span>
@@ -9,7 +9,7 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #endif
-#include "InputManager.hpp"
+#include "core/InputManager.hpp"
 #include "TestShader.hpp"
 #include <magic_enum/magic_enum.hpp>
 #include <print>

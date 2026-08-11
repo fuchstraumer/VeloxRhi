@@ -1,5 +1,5 @@
 #include "utility/MeshGenerator.hpp"
-#include "Math.hpp"
+#include "math/Math.hpp"
 #include <array>
 #include <span>
 #include <vector>

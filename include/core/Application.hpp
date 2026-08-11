@@ -2,7 +2,7 @@
 #ifndef VELOX_APPLICATION_HPP
 #define VELOX_APPLICATION_HPP
 #include <cstdint>
-#include "VeloxErrors.hpp"
+#include "common/VeloxErrors.hpp"
 
 struct GLFWwindow;
 

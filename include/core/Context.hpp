@@ -1,8 +1,7 @@
 #pragma once
-
 #ifndef VELOX_WEB_GPU_CONTEXT_HPP
 #define VELOX_WEB_GPU_CONTEXT_HPP
-#include "VeloxErrors.hpp"
+#include "common/VeloxErrors.hpp"
 #include "Future.hpp"
 #include <cstdint>
 #include <span>

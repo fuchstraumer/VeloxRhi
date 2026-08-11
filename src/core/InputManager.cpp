@@ -1,4 +1,4 @@
-#include "InputManager.hpp"
+#include "core/InputManager.hpp"
 #include <algorithm>
 #include <cmath>
 #include <magic_enum/magic_enum.hpp>

@@ -1,7 +1,7 @@
 #pragma once
 #ifndef VELOX_SCHEDULER_HPP
 #define VELOX_SCHEDULER_HPP
-#include "VeloxErrors.hpp"
+#include "common/VeloxErrors.hpp"
 #include "utility/SlotMap.hpp"
 #include <coroutine>
 
