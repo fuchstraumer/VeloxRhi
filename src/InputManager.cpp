@@ -117,8 +117,8 @@ void InputManager::PrepareFrame() noexcept
     if (iter != incomingEvents.end())
     {
 
-        auto FocusEvent = std::get<FocusEvent>(iter->EventData);
-        if (!FocusEvent.Focused)
+        auto CurrFocusEvent = std::get<FocusEvent>(iter->EventData);
+        if (!CurrFocusEvent.Focused)
         {
             gestureState = GestureRecognizerState{};
             activeTouchPositions.clear();
