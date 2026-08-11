@@ -1,17 +1,14 @@
-# Standalone test executables - no GTest, no Catch2. Each one is a plain program that prints its
-# failures and returns nonzero, so it can be run by hand or through ctest. Under the Emscripten
-# preset these build to .js/.wasm and are run with node; natively they are ordinary .exe files.
-#
-# The point of these is that broken math is otherwise only discoverable by staring at wrong pixels.
-# or vertex soup scattered across the screen into an urecognizable smear of bad transforms.
+# Standalone test executables - no GTest, no Catch2. Each prints its failures and returns nonzero, so
+# it runs by hand or under ctest. Emscripten builds these to .js/.wasm run via node; native builds are
+# ordinary .exe. They exist because broken math is otherwise only visible as wrong pixels, or as vertex
+# soup smeared across the screen by bad transforms.
 function(add_velox_unit_test NAME)
     add_executable(${NAME} ${ARGN} TestHarness.cpp TestHarness.hpp)
 
     set_target_properties(${NAME} PROPERTIES FOLDER "Tests")
     set_target_properties(${NAME} PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED YES)
 
-    # Only the headers are needed: velox::math is header-only, so linking the whole library (and
-    # therefore Dawn and GLFW) would make these far slower to build than they need to be
+    # headers only: velox::math is header-only, and linking the library would drag in Dawn and GLFW
     target_include_directories(${NAME} PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
     if (EMSCRIPTEN)
