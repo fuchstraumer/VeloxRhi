@@ -13,7 +13,7 @@ namespace velox
 
 using namespace math;
 
-static const size_t k_MeshVertexStrideBytes = sizeof(MeshVertex);
+static const size_t k_MeshVertexStrideBytes = sizeof(float) * 14;;
 static const size_t k_MeshVertexStrideFloats = k_MeshVertexStrideBytes / sizeof(float);
 
 static const std::array<Float4, 8> BOX_POSITIONS
@@ -64,39 +64,6 @@ constexpr size_t BOX_FACE_INDICES[6][4]
     {5, 0, 3, 6}, // Face 3
     {5, 4, 1, 0}, // Face 4
     {4, 5, 6, 7}  // Face 5
-};
-
-static constexpr float GOLDEN_RATIO = 1.61803398875f;
-static constexpr float FLOAT_PI = 3.141592653589793238462f;
-
-static const std::array<Float3, 12> ICOSPHERE_POSITIONS
-{
-    Float3(-GOLDEN_RATIO, 1.0f, 0.0f),
-    Float3( GOLDEN_RATIO, 1.0f, 0.0f),
-    Float3(-GOLDEN_RATIO,-1.0f, 0.0f),
-    Float3( GOLDEN_RATIO,-1.0f, 0.0f),
-    Float3( 0.0f,-GOLDEN_RATIO, 1.0f),
-    Float3( 0.0f, GOLDEN_RATIO, 1.0f),
-    Float3( 0.0f,-GOLDEN_RATIO,-1.0f),
-    Float3( 0.0f, GOLDEN_RATIO,-1.0f),
-    Float3( 1.0f, 0.0f,-GOLDEN_RATIO),
-    Float3( 1.0f, 0.0f, GOLDEN_RATIO),
-    Float3(-1.0f, 0.0f,-GOLDEN_RATIO),
-    Float3(-1.0f, 0.0f, GOLDEN_RATIO)
-};
-
-constexpr static std::array<uint32_t, 60> ICOSPHERE_INDICES
-{
-    0,11, 5, 0, 5, 1,
-    0, 1, 7, 0, 7,10,
-    0,10,11, 5,11, 4,
-    1, 5, 9, 7, 1, 8,
-    10, 7, 6,11,10, 2,
-    3, 9, 4, 3, 4, 2,
-    3, 2, 6, 3, 6, 8,
-    3, 8, 9, 4, 9, 5,
-    2, 4,11, 6, 2,10,
-    8, 6, 7, 9, 8, 1
 };
 
 std::unique_ptr<MeshData> GenerateBox(uint32_t widthSegments,
@@ -191,10 +158,13 @@ std::unique_ptr<MeshData> CreateIcosphere(size_t detail_level)
          4,  9,  5,    2,  4, 11,    6,  2, 10,    8,  6,  7,    9,  8,  1
     };
 
-    // Normalize initial positions to lay on the sphere
+    // Normalize initial positions to lay on the sphere. Normalize<3> divides every lane by the
+    // xyz length, w included, so the homogeneous w has to be put back afterwards
     std::transform(positions.begin(), positions.end(), positions.begin(), [](const Float4& p)
     {
-        return ToVector(p).Normalize<3>();
+        Float4 onSphere = FromVector(ToVector(p).Normalize<3>());
+        onSphere.w = 1.0f;
+        return onSphere;
     });
 
     // 2. Subdivide using an Edge Cache to avoid duplicate vertices
@@ -212,8 +182,10 @@ std::unique_ptr<MeshData> CreateIcosphere(size_t detail_level)
 
         Vector pos1 = ToVector(positions[v1]);
         Vector pos2 = ToVector(positions[v2]);
-        Vector mid = (pos1 + pos2).Normalize<3>();
-        positions.push_back(FromVector(mid));
+        Vector mid = (pos1 + pos2).Normalize<4>();
+        Float4 midpoint = FromVector(mid);
+        midpoint.w = 1.0f;
+        positions.push_back(midpoint);
         uint16_t index = static_cast<uint16_t>(positions.size() - 1);
         edgeCache[key] = index;
         return index;
@@ -233,8 +205,13 @@ std::unique_ptr<MeshData> CreateIcosphere(size_t detail_level)
             uint16_t a = getMidpoint(v0, v1);
             uint16_t b = getMidpoint(v1, v2);
             uint16_t c = getMidpoint(v2, v0);
+            uint16_t new_tris[] = { v0, a, c,   v1, b, a,   v2, c, b,   a, b, c };
+            std::span<const uint16_t> new_tris_span(new_tris, std::size(new_tris));
 
-            nextIndices.insert(nextIndices.end(), { v0, a, c,   v1, b, a,   v2, c, b,   a, b, c });
+            // use std::move_iterators to avoid copying the array into the vector
+            nextIndices.insert(nextIndices.end(),
+                               std::make_move_iterator(new_tris_span.begin()),
+                               std::make_move_iterator(new_tris_span.end()));
         }
         indices = std::move(nextIndices);
     }
