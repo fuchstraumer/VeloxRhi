@@ -1,6 +1,7 @@
 #pragma once
 #ifndef VELOX_RHI_MATH_POLYNOMIALS_HPP
 #define VELOX_RHI_MATH_POLYNOMIALS_HPP
+#include <cstdint>
 
 // Coefficients shared by the scalar and SIMD transcendentals, in one place so they cannot drift. A
 // coefficient differing between the two gives two plausible answers off in the fifth decimal, which
@@ -56,6 +57,28 @@ constexpr float k_SinEstPoly7 = -0.00018524670f;
 constexpr float k_CosEstPoly2 = -0.49992746f;
 constexpr float k_CosEstPoly4 = 0.041493919f;
 constexpr float k_CosEstPoly6 = -0.0012712436f;
+
+// atan on [-1, 1], DirectXMath minimax (g_XMATanCoefficients0/1). Odd: x * (1 + x^2 * (...)).
+// |x| > 1 reduces via atan(x) = pi/2 - atan(1/x), so this table covers the whole line
+constexpr float k_ATanPoly3 = -0.3333314528f;
+constexpr float k_ATanPoly5 = 0.1999355085f;
+constexpr float k_ATanPoly7 = -0.1420889944f;
+constexpr float k_ATanPoly9 = 0.1065626393f;
+constexpr float k_ATanPoly11 = -0.0752896400f;
+constexpr float k_ATanPoly13 = 0.0429096138f;
+constexpr float k_ATanPoly15 = -0.0161657367f;
+constexpr float k_ATanPoly17 = 0.0028662257f;
+
+// Base conversions, so Exp/Log/Exp10/Log10 are all one multiply away from Exp2/Log2
+constexpr float k_Log2OfE = 1.44269504f;
+constexpr float k_LnOf2 = 0.693147181f;
+constexpr float k_Log2Of10 = 3.32192809f;
+constexpr float k_Log10Of2 = 0.301029996f;
+
+// Reciprocal-sqrt seed: Lomont's refinement of the Quake constant. One Newton-Raphson step off this
+// lands near 2e-3 relative, which is what ReciprocalSqrtEst promises on wasm. Improved constants and
+// modified NR corrections: Walczyk, Moroz & Cieslinski, Entropy 23(1), 2021
+constexpr uint32_t k_ReciprocalSqrtSeed = 0x5F375A86u;
 
 } // namespace velox::math::detail
 

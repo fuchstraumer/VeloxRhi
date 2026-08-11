@@ -64,4 +64,107 @@ VX_MATH_FORCEINLINE Vector Vector::CosEst() const noexcept
     return Vector{ DirectX::XMVectorCosEst(data) };
 }
 
+VX_MATH_FORCEINLINE Vector Vector::Tan() const noexcept
+{
+    return Vector{ DirectX::XMVectorTan(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::TanEst() const noexcept
+{
+    return Vector{ DirectX::XMVectorTanEst(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::ASin() const noexcept
+{
+    return Vector{ DirectX::XMVectorASin(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::ACos() const noexcept
+{
+    return Vector{ DirectX::XMVectorACos(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::ATan() const noexcept
+{
+    return Vector{ DirectX::XMVectorATan(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::ATan2(Vector y, Vector x) noexcept
+{
+    return Vector{ DirectX::XMVectorATan2(y.data, x.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::TanH() const noexcept
+{
+    return Vector{ DirectX::XMVectorTanH(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::SinH() const noexcept
+{
+    return Vector{ DirectX::XMVectorSinH(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::CosH() const noexcept
+{
+    return Vector{ DirectX::XMVectorCosH(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Exp(Vector value) noexcept
+{
+    return Vector{ DirectX::XMVectorExpE(value.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Exp10(Vector value) noexcept
+{
+    return Vector{ DirectX::XMVectorExp10(value.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Log(Vector value) noexcept
+{
+    return Vector{ DirectX::XMVectorLogE(value.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Log10(Vector value) noexcept
+{
+    return Vector{ DirectX::XMVectorLog10(value.data) };
+}
+
+// rcpps and rsqrtps, ~12 bits each - genuinely approximate here, unlike on wasm where div and sqrt
+// are single instructions and the Est forms are exact
+VX_MATH_FORCEINLINE Vector Vector::ReciprocalEst() const noexcept
+{
+    return Vector{ DirectX::XMVectorReciprocalEst(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::ReciprocalSqrtEst() const noexcept
+{
+    return Vector{ DirectX::XMVectorReciprocalSqrtEst(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::SqrtEst() const noexcept
+{
+    return Vector{ DirectX::XMVectorSqrtEst(data) };
+}
+
+template<int N>
+VX_MATH_FORCEINLINE Vector Vector::NormalizeEst() const noexcept
+{
+    static_assert(N >= 2 && N <= 4, "NormalizeEst dimensionality must be 2, 3, or 4");
+    return Vector{ DirectX::XMVectorMultiply(data, DotVec<N>(*this).ReciprocalSqrtEst().Data()) };
+}
+
+template<int N>
+VX_MATH_FORCEINLINE float Vector::LengthEst() const noexcept
+{
+    static_assert(N >= 2 && N <= 4, "LengthEst dimensionality must be 2, 3, or 4");
+    return DirectX::XMVectorGetX(DotVec<N>(*this).SqrtEst().Data());
+}
+
+template<int N>
+VX_MATH_FORCEINLINE float Vector::ReciprocalLengthEst() const noexcept
+{
+    static_assert(N >= 2 && N <= 4, "ReciprocalLengthEst dimensionality must be 2, 3, or 4");
+    return DirectX::XMVectorGetX(DotVec<N>(*this).ReciprocalSqrtEst().Data());
+}
+
 } // namespace velox::math

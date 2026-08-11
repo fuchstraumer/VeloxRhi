@@ -774,6 +774,106 @@ constexpr Float3 operator*(const Float4x4& mat, const Float3& vec) noexcept
     );
 }
 
+VX_MATH_FORCEINLINE float Tan(float radians) noexcept
+{
+    const ScalarSinCos pair = SinCos(radians);
+    return pair.sin / pair.cos;
+}
+
+VX_MATH_FORCEINLINE float ATan(float value) noexcept
+{
+    constexpr float k_HalfPi = std::numbers::pi_v<float> * 0.5f;
+
+    const float magnitude = value < 0.0f ? -value : value;
+    // atan(x) = sign(x) * pi/2 - atan(1/x) outside [-1, 1], which is where the table is fitted
+    const float reduced = magnitude <= 1.0f ? value : 1.0f / value;
+
+    const float squared = reduced * reduced;
+    float polynomial = detail::k_ATanPoly17;
+    polynomial = polynomial * squared + detail::k_ATanPoly15;
+    polynomial = polynomial * squared + detail::k_ATanPoly13;
+    polynomial = polynomial * squared + detail::k_ATanPoly11;
+    polynomial = polynomial * squared + detail::k_ATanPoly9;
+    polynomial = polynomial * squared + detail::k_ATanPoly7;
+    polynomial = polynomial * squared + detail::k_ATanPoly5;
+    polynomial = polynomial * squared + detail::k_ATanPoly3;
+    polynomial = polynomial * squared + 1.0f;
+    const float inner = polynomial * reduced;
+
+    if (magnitude <= 1.0f)
+    {
+        return inner;
+    }
+    return (value < 0.0f ? -k_HalfPi : k_HalfPi) - inner;
+}
+
+VX_MATH_FORCEINLINE float ATan2(float y, float x) noexcept
+{
+    constexpr float k_Pi = std::numbers::pi_v<float>;
+
+    if (x == 0.0f && y == 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const float base = ATan(y / x);
+    if (x >= 0.0f)
+    {
+        return base;
+    }
+    return base + (y < 0.0f ? -k_Pi : k_Pi);
+}
+
+VX_MATH_FORCEINLINE float ASin(float value) noexcept
+{
+    return ATan2(value, std::sqrt(1.0f - value * value));
+}
+
+VX_MATH_FORCEINLINE float ACos(float value) noexcept
+{
+    return ATan2(std::sqrt(1.0f - value * value), value);
+}
+
+VX_MATH_FORCEINLINE float Pow(float base, float exponent) noexcept
+{
+    return Exp2(exponent * Log2(base));
+}
+
+// 1 - 2 / (e^2x + 1); saturates to 1 rather than producing inf/inf where the difference form would
+VX_MATH_FORCEINLINE float TanH(float value) noexcept
+{
+    return 1.0f - 2.0f / (Exp2(2.0f * value * detail::k_Log2OfE) + 1.0f);
+}
+
+// Shortest arc: q and -q are the same rotation, so a negative dot means the other representation is
+// nearer and negating one endpoint avoids interpolating the long way round. Near-parallel endpoints
+// fall back to a normalized lerp, where sin(theta) is too small to divide by.
+VX_MATH_FORCEINLINE Quaternion Quaternion::Slerp(Quaternion from, Quaternion to, float t) noexcept
+{
+    float cosine = from.Dot(to);
+    Quaternion target = to;
+    if (cosine < 0.0f)
+    {
+        target = Quaternion{ -static_cast<Vector>(to) };
+        cosine = -cosine;
+    }
+
+    constexpr float k_ParallelThreshold = 0.9995f;
+    if (cosine > k_ParallelThreshold)
+    {
+        const Vector blended =
+            static_cast<Vector>(from) + (static_cast<Vector>(target) - static_cast<Vector>(from)) * t;
+        return Quaternion{ blended }.Normalize();
+    }
+
+    const float theta = ACos(Clamp(cosine, -1.0f, 1.0f));
+    const float reciprocalSine = 1.0f / Sin(theta);
+    const float fromWeight = Sin((1.0f - t) * theta) * reciprocalSine;
+    const float toWeight = Sin(t * theta) * reciprocalSine;
+
+    return Quaternion{ static_cast<Vector>(from) * fromWeight + static_cast<Vector>(target) * toWeight };
+}
+
 } // namespace math
 
 // ============================================================================

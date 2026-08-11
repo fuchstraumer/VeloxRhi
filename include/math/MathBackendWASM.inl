@@ -446,42 +446,6 @@ VX_MATH_FORCEINLINE Vector Vector::Max(Vector other) const noexcept
     return Vector{ detail::FastMax(data, other.data) };
 }
 
-// No native SIMD pow in WASM SIMD128 - per-lane std::pow. Not remotely as
-// fast as the rest of this file, but Pow() wasn't a hot-path SIMD win in
-// the original DirectXMath backend either (XMVectorPow is itself a
-// per-lane scalar loop under the hood).
-VX_MATH_FORCEINLINE Vector Vector::Pow(float exponent) const noexcept
-{
-    return Vector{ wasm_f32x4_make(std::pow(wasm_f32x4_extract_lane(data, 0), exponent),
-                                   std::pow(wasm_f32x4_extract_lane(data, 1), exponent),
-                                   std::pow(wasm_f32x4_extract_lane(data, 2), exponent),
-                                   std::pow(wasm_f32x4_extract_lane(data, 3), exponent)) };
-}
-
-VX_MATH_FORCEINLINE Vector Vector::Pow(Vector exponent) const noexcept
-{
-    return Vector{ wasm_f32x4_make(
-        std::pow(wasm_f32x4_extract_lane(data, 0), wasm_f32x4_extract_lane(exponent.data, 0)),
-        std::pow(wasm_f32x4_extract_lane(data, 1), wasm_f32x4_extract_lane(exponent.data, 1)),
-        std::pow(wasm_f32x4_extract_lane(data, 2), wasm_f32x4_extract_lane(exponent.data, 2)),
-        std::pow(wasm_f32x4_extract_lane(data, 3), wasm_f32x4_extract_lane(exponent.data, 3))) };
-}
-
-VX_MATH_FORCEINLINE Vector Vector::Abs(Vector vec) noexcept
-{
-    return Vector{ wasm_f32x4_abs(vec.data) };
-}
-
-VX_MATH_FORCEINLINE Vector Vector::Pow(Vector base, float exponent) noexcept
-{
-    return base.Pow(exponent);
-}
-
-VX_MATH_FORCEINLINE Vector Vector::Pow(Vector base, Vector exponent) noexcept
-{
-    return base.Pow(exponent);
-}
-
 VX_MATH_FORCEINLINE Vector Vector::Infinity() noexcept
 {
     return Vector{ wasm_f32x4_const_splat(std::numeric_limits<float>::infinity()) };

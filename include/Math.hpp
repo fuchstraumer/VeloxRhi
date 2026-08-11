@@ -102,13 +102,12 @@ struct ScalarSinCos
  * Removed / deferred during the WASM port (add back if/when needed):
  * -----------------------------------------------------------------------
  * - Integer vector types trimmed prior to this port
- * - Vector::ReciprocalEst / SqrtEst / ReciprocalSqrtEst, and the
- *   NormalizeEst<N>/LengthEst<N> that depended on them - WASM SIMD128 has no
- *   approximate sqrt/rsqrt intrinsic; would need a hand-rolled fast-inverse-sqrt.
  * - Vector::Refract<N> - no native intrinsic on the WASM side and
  *   comparatively rarely used
  * - Vector::AlmostEqual(Vector), AlmostEqual(Vector, float), AlmostZero() removed;
  *   CompareNearEqual + VectorMask::AllTrue<N> covers these now
+ * - Hermite/CatmullRom/BaryCentric, AngleBetweenVectors, ClampLength and Orthogonal
+ *   are not ported yet; nothing needs them so far
  * -----------------------------------------------------------------------
  * Also worth flagging (pre-existing in the source, preserved as-is):
  * -----------------------------------------------------------------------
@@ -552,12 +551,58 @@ public:
     /** @brief Absolute error under 2e-5 */
     Vector CosEst() const noexcept;
 
+    /** @brief Sin/Cos, so accuracy degrades near the poles at odd multiples of pi/2 */
+    Vector Tan() const noexcept;
+    Vector TanEst() const noexcept;
+
+    /** @brief Input outside [-1, 1] yields NaN. Absolute error under 1e-5 */
+    Vector ASin() const noexcept;
+    /** @brief Input outside [-1, 1] yields NaN. Absolute error under 1e-5 */
+    Vector ACos() const noexcept;
+    /** @brief Result in [-pi/2, pi/2]. Absolute error under 1e-6 */
+    Vector ATan() const noexcept;
+
+    /** @brief Absolute error under 1e-5; saturates to +-1 rather than overflowing */
+    Vector TanH() const noexcept;
+    /** @brief Overflows to infinity past |x| ~= 89.
+     *  @note A difference of two exponentials, so relative error is poor near zero where sinh(x) -> x
+     *  and the two terms cancel. Absolute error stays under 2e-4. */
+    Vector SinH() const noexcept;
+    /** @brief Overflows to infinity past |x| ~= 89 */
+    Vector CosH() const noexcept;
+
+    // Est forms of the reciprocals. Backend-dependent accuracy, and more so than the polynomial
+    // approximations: DirectXMath has hardware rcp/rsqrt, wasm has neither. On wasm, reciprocal and
+    // square root are already single instructions, so only ReciprocalSqrtEst actually approximates -
+    // via a seeded Newton-Raphson step, landing near 2e-3 against DirectXMath's ~4e-4.
+    Vector ReciprocalEst() const noexcept;
+    Vector ReciprocalSqrtEst() const noexcept;
+    Vector SqrtEst() const noexcept;
+
+    template<int N>
+    Vector NormalizeEst() const noexcept;
+
+    template<int N>
+    float LengthEst() const noexcept;
+
+    template<int N>
+    float ReciprocalLengthEst() const noexcept;
+
     static Vector Replicate(float scalar) noexcept;
     static Vector Zero() noexcept;
     static Vector Identity() noexcept;
     static Vector Abs(Vector vec) noexcept;
     static Vector Pow(Vector base, float exponent) noexcept;
     static Vector Pow(Vector base, Vector exponent) noexcept;
+    /** @brief e^x, via Exp2 */
+    static Vector Exp(Vector value) noexcept;
+    /** @brief 10^x, via Exp2 */
+    static Vector Exp10(Vector value) noexcept;
+    /** @brief Natural log, via Log2 */
+    static Vector Log(Vector value) noexcept;
+    static Vector Log10(Vector value) noexcept;
+    /** @brief Result in [-pi, pi], quadrant from both signs. x == y == 0 yields 0 */
+    static Vector ATan2(Vector y, Vector x) noexcept;
     static Vector Infinity() noexcept;
     static Vector QuietNaN() noexcept;
     static Vector Epsilon() noexcept;
@@ -668,6 +713,8 @@ public:
     /** @brief Assumes the upper-left 3x3 is orthonormal.
      *  @note Scalar and branchy for robustness (see QuaternionBackendWASM.inl), so slow. Use sparingly. */
     static Quaternion FromMatrix(const Matrix& mat) noexcept;
+    /** @brief Shortest-arc interpolation. Falls back to a normalized lerp for near-parallel endpoints */
+    static Quaternion Slerp(Quaternion from, Quaternion to, float t) noexcept;
 
 private:
 #if VX_MATH_BACKEND_WASM
@@ -1060,6 +1107,15 @@ float Cos(float radians) noexcept;
 
 float Exp2(float value) noexcept;
 float Log2(float value) noexcept;
+float Tan(float radians) noexcept;
+/** @brief Input outside [-1, 1] yields NaN */
+float ASin(float value) noexcept;
+/** @brief Input outside [-1, 1] yields NaN */
+float ACos(float value) noexcept;
+float ATan(float value) noexcept;
+float ATan2(float y, float x) noexcept;
+float Pow(float base, float exponent) noexcept;
+float TanH(float value) noexcept;
 
 /** @brief Wraps into [-pi, pi] */
 constexpr float ModAngles(float radians) noexcept;

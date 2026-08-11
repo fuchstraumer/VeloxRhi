@@ -581,6 +581,35 @@ float VectorLog2Est(float value)
     return Vector::Replicate(value).Log2Est().x();
 }
 
+float VectorTan(float radians)
+{
+    return Vector::Replicate(radians).Tan().x();
+}
+float VectorATan(float value)
+{
+    return Vector::Replicate(value).ATan().x();
+}
+float VectorASin(float value)
+{
+    return Vector::Replicate(value).ASin().x();
+}
+float VectorACos(float value)
+{
+    return Vector::Replicate(value).ACos().x();
+}
+float VectorTanH(float value)
+{
+    return Vector::Replicate(value).TanH().x();
+}
+float VectorSinH(float value)
+{
+    return Vector::Replicate(value).SinH().x();
+}
+float VectorCosH(float value)
+{
+    return Vector::Replicate(value).CosH().x();
+}
+
 void TestTranscendentalAccuracy(TestRunner& runner)
 {
     runner.BeginSection("transcendental accuracy sweeps");
@@ -716,6 +745,159 @@ void TestTranscendentalIdentities(TestRunner& runner)
                  "RotationZ(0) is the identity");
 }
 
+void TestDerivedTranscendentals(TestRunner& runner)
+{
+    runner.BeginSection("derived transcendentals");
+
+    const auto referenceATan = [](float x) { return std::atan(static_cast<double>(x)); };
+    const auto referenceASin = [](float x) { return std::asin(static_cast<double>(x)); };
+    const auto referenceACos = [](float x) { return std::acos(static_cast<double>(x)); };
+    const auto referenceTanH = [](float x) { return std::tanh(static_cast<double>(x)); };
+    const auto referenceSinH = [](float x) { return std::sinh(static_cast<double>(x)); };
+    const auto referenceCosH = [](float x) { return std::cosh(static_cast<double>(x)); };
+
+    // atan across the reciprocal-identity boundary at |x| == 1, and far beyond it
+    CheckSweep(runner, SweepAbsolute(-1.0f, 1.0f, 20000, VectorATan, referenceATan), 2e-6,
+               "ATan within 2e-6 on [-1, 1]");
+    CheckSweep(runner, SweepAbsolute(-100.0f, 100.0f, 20000, VectorATan, referenceATan), 2e-6,
+               "ATan survives the reciprocal reduction out to +-100");
+
+    // asin/acos go through ATan2, so they are worst near +-1 where the sqrt collapses
+    CheckSweep(runner, SweepAbsolute(-0.999f, 0.999f, 20000, VectorASin, referenceASin), 2e-5,
+               "ASin within 2e-5");
+    CheckSweep(runner, SweepAbsolute(-0.999f, 0.999f, 20000, VectorACos, referenceACos), 2e-5,
+               "ACos within 2e-5");
+
+    CheckSweep(runner, SweepAbsolute(-10.0f, 10.0f, 20000, VectorTanH, referenceTanH), 2e-5,
+               "TanH within 2e-5");
+    // sinh needs both metrics. Near zero, sinh(x) -> x and the difference of two exponentials that are
+    // both ~1 cancels, so relative error is poor while absolute stays tiny. Away from zero the value
+    // grows exponentially, so absolute error grows with it while relative is excellent.
+    CheckSweep(runner, SweepAbsolute(-0.5f, 0.5f, 20000, VectorSinH, referenceSinH), 1e-5,
+               "SinH absolute error within 1e-5 near zero");
+    CheckSweep(runner, SweepRelative(0.5f, 10.0f, 20000, VectorSinH, referenceSinH), 2e-5,
+               "SinH relative error within 2e-5 away from zero");
+    CheckSweep(runner, SweepRelative(-10.0f, 10.0f, 20000, VectorCosH, referenceCosH), 2e-5,
+               "CosH relative error within 2e-5");
+
+    // Tan away from the poles, where sin/cos is well conditioned
+    CheckSweep(runner, SweepAbsolute(-1.4f, 1.4f, 20000, VectorTan,
+                                     [](float x) { return std::tan(static_cast<double>(x)); }),
+               1e-4, "Tan within 1e-4 away from the poles");
+
+    // endpoints and identities
+    runner.CheckNear(VectorASin(1.0f), k_Pi * 0.5f, 1e-4f, "asin(1) is pi/2");
+    runner.CheckNear(VectorASin(-1.0f), -k_Pi * 0.5f, 1e-4f, "asin(-1) is -pi/2");
+    runner.CheckNear(VectorACos(1.0f), 0.0f, 1e-4f, "acos(1) is 0");
+    runner.CheckNear(VectorACos(-1.0f), k_Pi, 1e-4f, "acos(-1) is pi");
+    runner.CheckNear(VectorACos(0.0f), k_Pi * 0.5f, 1e-4f, "acos(0) is pi/2");
+    runner.CheckNear(VectorTanH(0.0f), 0.0f, 1e-6f, "tanh(0) is 0");
+    // the saturating form must not produce NaN where the exponential overflows
+    runner.CheckNear(VectorTanH(50.0f), 1.0f, 1e-6f, "TanH saturates to 1 rather than going NaN");
+    runner.CheckNear(VectorTanH(-50.0f), -1.0f, 1e-6f, "TanH saturates to -1");
+    runner.Check(!Vector::Replicate(90.0f).TanH().IsNaN().AnyTrue<4>(), "TanH stays finite past overflow");
+    runner.CheckNear(VectorCosH(0.0f), 1.0f, 1e-6f, "cosh(0) is 1");
+    runner.CheckNear(VectorSinH(0.0f), 0.0f, 1e-6f, "sinh(0) is 0");
+    // cosh^2 - sinh^2 == 1
+    const Vector hyperbolicArg = Vector::Replicate(1.3f);
+    const float coshValue = hyperbolicArg.CosH().x();
+    const float sinhValue = hyperbolicArg.SinH().x();
+    runner.CheckNear(coshValue * coshValue - sinhValue * sinhValue, 1.0f, 1e-4f,
+                     "cosh^2 - sinh^2 is 1");
+
+    // ATan2 quadrants: all four, plus the axes
+    runner.CheckNear(Vector::ATan2(Vector::Replicate(1.0f), Vector::Replicate(1.0f)).x(),
+                     k_Pi * 0.25f, 1e-5f, "ATan2 first quadrant");
+    runner.CheckNear(Vector::ATan2(Vector::Replicate(1.0f), Vector::Replicate(-1.0f)).x(),
+                     k_Pi * 0.75f, 1e-5f, "ATan2 second quadrant");
+    runner.CheckNear(Vector::ATan2(Vector::Replicate(-1.0f), Vector::Replicate(-1.0f)).x(),
+                     -k_Pi * 0.75f, 1e-5f, "ATan2 third quadrant");
+    runner.CheckNear(Vector::ATan2(Vector::Replicate(-1.0f), Vector::Replicate(1.0f)).x(),
+                     -k_Pi * 0.25f, 1e-5f, "ATan2 fourth quadrant");
+    runner.CheckNear(Vector::ATan2(Vector::Replicate(1.0f), Vector::Zero()).x(),
+                     k_Pi * 0.5f, 1e-5f, "ATan2 on the +y axis");
+    runner.CheckNear(Vector::ATan2(Vector::Zero(), Vector::Zero()).x(), 0.0f, 1e-6f,
+                     "ATan2(0, 0) is 0 rather than NaN");
+
+    // Pow, now off Exp2/Log2 rather than a per-lane std::pow loop
+    runner.CheckNear(Vector::Replicate(2.0f).Pow(10.0f).x(), 1024.0f, 1e-4f, "2^10 is 1024");
+    runner.CheckNear(Vector::Replicate(9.0f).Pow(0.5f).x(), 3.0f, 1e-4f, "Pow(x, 0.5) is sqrt(x)");
+    runner.CheckNear(Vector::Replicate(7.0f).Pow(1.0f).x(), 7.0f, 1e-4f, "Pow(x, 1) is x");
+    runner.CheckNear(Vector::Replicate(7.0f).Pow(0.0f).x(), 1.0f, 1e-4f, "Pow(x, 0) is 1");
+    runner.CheckNear(Vector::Replicate(2.0f).Pow(-2.0f).x(), 0.25f, 1e-4f, "a negative exponent");
+    runner.CheckNear(Pow(3.0f, 4.0f), 81.0f, 1e-4f, "scalar Pow");
+
+    // base conversions
+    runner.CheckNear(Vector::Exp(Vector::Replicate(1.0f)).x(), std::exp(1.0f), 1e-5f, "Exp(1) is e");
+    runner.CheckNear(Vector::Log(Vector::Replicate(std::exp(1.0f))).x(), 1.0f, 1e-5f, "Log(e) is 1");
+    runner.CheckNear(Vector::Exp10(Vector::Replicate(3.0f)).x(), 1000.0f, 1e-4f, "Exp10(3) is 1000");
+    runner.CheckNear(Vector::Log10(Vector::Replicate(1000.0f)).x(), 3.0f, 1e-5f, "Log10(1000) is 3");
+
+    // the estimate family: loose bounds on purpose, and backend-dependent
+    for (float value : { 0.05f, 0.5f, 1.0f, 2.0f, 17.0f, 500.0f })
+    {
+        const Vector broadcast = Vector::Replicate(value);
+        const float reciprocalSqrt = broadcast.ReciprocalSqrtEst().x();
+        runner.CheckNear(reciprocalSqrt, 1.0f / std::sqrt(value), 3e-3f, "ReciprocalSqrtEst");
+        runner.CheckNear(broadcast.SqrtEst().x(), std::sqrt(value), 3e-3f, "SqrtEst");
+        runner.CheckNear(broadcast.ReciprocalEst().x(), 1.0f / value, 3e-3f, "ReciprocalEst");
+    }
+    const Vector toNormalize{ 3.0f, 4.0f, 0.0f, 0.0f };
+    runner.CheckNear(toNormalize.NormalizeEst<3>().Length<3>(), 1.0f, 3e-3f, "NormalizeEst<3>");
+    runner.CheckNear(toNormalize.LengthEst<3>(), 5.0f, 3e-3f, "LengthEst<3>");
+    runner.CheckNear(toNormalize.ReciprocalLengthEst<3>(), 0.2f, 3e-3f, "ReciprocalLengthEst<3>");
+
+    // scalar counterparts track the vector forms
+    runner.CheckNear(ATan(0.7f), VectorATan(0.7f), 1e-5f, "scalar ATan tracks the vector form");
+    runner.CheckNear(ATan(3.5f), VectorATan(3.5f), 1e-5f, "scalar ATan past the reduction boundary");
+    runner.CheckNear(ASin(0.6f), VectorASin(0.6f), 1e-4f, "scalar ASin tracks the vector form");
+    runner.CheckNear(ACos(0.6f), VectorACos(0.6f), 1e-4f, "scalar ACos tracks the vector form");
+    runner.CheckNear(TanH(0.8f), VectorTanH(0.8f), 1e-4f, "scalar TanH tracks the vector form");
+    runner.CheckNear(ATan2(1.0f, -1.0f), k_Pi * 0.75f, 1e-5f, "scalar ATan2 quadrant");
+    runner.CheckNear(Tan(0.9f), VectorTan(0.9f), 1e-4f, "scalar Tan tracks the vector form");
+}
+
+void TestSlerp(TestRunner& runner)
+{
+    runner.BeginSection("slerp");
+
+    const Quaternion from = Quaternion::RotationAxis(Vector{ 0.0f, 1.0f, 0.0f }, 0.2f);
+    const Quaternion to = Quaternion::RotationAxis(Vector{ 0.0f, 1.0f, 0.0f }, 1.4f);
+
+    runner.Check(MatrixNear(Quaternion::Slerp(from, to, 0.0f).ToMatrix(), from.ToMatrix(), k_Loose),
+                 "Slerp at t = 0 returns the first endpoint");
+    runner.Check(MatrixNear(Quaternion::Slerp(from, to, 1.0f).ToMatrix(), to.ToMatrix(), k_Loose),
+                 "Slerp at t = 1 returns the second endpoint");
+
+    // on a shared axis the interpolation is linear in angle, which gives an exact expectation
+    const Quaternion midpoint = Quaternion::Slerp(from, to, 0.5f);
+    runner.Check(MatrixNear(midpoint.ToMatrix(),
+                            Quaternion::RotationAxis(Vector{ 0.0f, 1.0f, 0.0f }, 0.8f).ToMatrix(),
+                            k_Loose),
+                 "Slerp is linear in angle about a shared axis");
+
+    // unit length has to survive, or repeated interpolation drifts
+    for (float t : { 0.0f, 0.1f, 0.35f, 0.5f, 0.9f, 1.0f })
+    {
+        runner.CheckNear(Quaternion::Slerp(from, to, t).Length(), 1.0f, 1e-4f,
+                         "Slerp stays unit length");
+    }
+
+    // shortest arc: negating an endpoint names the same rotation, so the path must not change
+    const Quaternion negated{ -static_cast<Vector>(to) };
+    runner.Check(MatrixNear(Quaternion::Slerp(from, negated, 0.5f).ToMatrix(), midpoint.ToMatrix(), k_Loose),
+                 "Slerp takes the shortest arc regardless of endpoint sign");
+
+    // near-parallel endpoints go through the lerp fallback rather than dividing by ~0
+    const Quaternion barelyApart = Quaternion::RotationAxis(Vector{ 0.0f, 1.0f, 0.0f }, 0.2001f);
+    const Quaternion blended = Quaternion::Slerp(from, barelyApart, 0.5f);
+    runner.CheckNear(blended.Length(), 1.0f, 1e-4f, "the near-parallel fallback stays unit length");
+    runner.Check(!static_cast<Vector>(blended).IsNaN().AnyTrue<4>(),
+                 "the near-parallel fallback does not divide by zero");
+    runner.Check(MatrixNear(Quaternion::Slerp(from, from, 0.5f).ToMatrix(), from.ToMatrix(), k_Loose),
+                 "Slerp between identical endpoints is a no-op");
+}
+
 } // namespace
 
 int main()
@@ -731,6 +913,8 @@ int main()
     TestQuaternions(runner);
     TestTranscendentalAccuracy(runner);
     TestTranscendentalIdentities(runner);
+    TestDerivedTranscendentals(runner);
+    TestSlerp(runner);
     TestStorageConversions(runner);
 
     return runner.Report();
