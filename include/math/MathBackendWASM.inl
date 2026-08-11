@@ -12,7 +12,7 @@ namespace detail
     // a * b + c
     VX_MATH_FORCEINLINE v128_t MulAdd(v128_t a, v128_t b, v128_t c) noexcept
     {
-#if defined(VX_MATH_RELAXED_FMA)
+#if defined(VX_MATH_RELAXED_SIMD)
         return wasm_f32x4_relaxed_madd(a, b, c);
 #else
         return wasm_f32x4_add(wasm_f32x4_mul(a, b), c);
@@ -22,7 +22,7 @@ namespace detail
     // c - a * b
     VX_MATH_FORCEINLINE v128_t NegMulAdd(v128_t a, v128_t b, v128_t c) noexcept
     {
-#if defined(VX_MATH_RELAXED_FMA)
+#if defined(VX_MATH_RELAXED_SIMD)
         return wasm_f32x4_relaxed_nmadd(a, b, c);
 #else
         return wasm_f32x4_sub(c, wasm_f32x4_mul(a, b));
@@ -47,6 +47,92 @@ namespace detail
                    Det3x3(m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2], m[3][0], m[3][1], m[3][2]);
     }
 } // namespace detail
+
+// ================================
+// VectorMask Implementation (WASM SIMD128)
+// ================================
+
+VX_MATH_FORCEINLINE VectorMask::VectorMask() noexcept
+    : data{ wasm_i32x4_const_splat(0) }
+{
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::operator&(VectorMask rhs) const noexcept
+{
+    return VectorMask{ wasm_v128_and(data, rhs.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::operator|(VectorMask rhs) const noexcept
+{
+    return VectorMask{ wasm_v128_or(data, rhs.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::operator^(VectorMask rhs) const noexcept
+{
+    return VectorMask{ wasm_v128_xor(data, rhs.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::operator~() const noexcept
+{
+    return VectorMask{ wasm_v128_not(data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask& VectorMask::operator&=(VectorMask rhs) noexcept
+{
+    data = wasm_v128_and(data, rhs.data);
+    return *this;
+}
+
+VX_MATH_FORCEINLINE VectorMask& VectorMask::operator|=(VectorMask rhs) noexcept
+{
+    data = wasm_v128_or(data, rhs.data);
+    return *this;
+}
+
+VX_MATH_FORCEINLINE VectorMask& VectorMask::operator^=(VectorMask rhs) noexcept
+{
+    data = wasm_v128_xor(data, rhs.data);
+    return *this;
+}
+
+VX_MATH_FORCEINLINE uint32_t VectorMask::LaneBits() const noexcept
+{
+    return static_cast<uint32_t>(wasm_i32x4_bitmask(data));
+}
+
+// AllTrue/AnyTrue go through the lane bitmask rather than wasm_i32x4_all_true, because the latter
+// always tests all four lanes and N may be 2 or 3. One bit per lane makes the width a simple mask.
+namespace detail
+{
+    template<int N>
+    constexpr uint32_t LaneBitsFor() noexcept
+    {
+        static_assert(N >= 2 && N <= 4, "Mask width must be 2, 3, or 4");
+        return (1u << N) - 1u;
+    }
+} // namespace detail
+
+template<int N>
+VX_MATH_FORCEINLINE bool VectorMask::AllTrue() const noexcept
+{
+    return (LaneBits() & detail::LaneBitsFor<N>()) == detail::LaneBitsFor<N>();
+}
+
+template<int N>
+VX_MATH_FORCEINLINE bool VectorMask::AnyTrue() const noexcept
+{
+    return (LaneBits() & detail::LaneBitsFor<N>()) != 0u;
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::AllSet() noexcept
+{
+    return VectorMask{ wasm_i32x4_const_splat(-1) };
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::AllClear() noexcept
+{
+    return VectorMask{ wasm_i32x4_const_splat(0) };
+}
 
 // ================================
 // Vector SIMD Implementation (WASM SIMD128)
@@ -141,7 +227,7 @@ VX_MATH_FORCEINLINE Vector Vector::operator-() const noexcept
 
 VX_MATH_FORCEINLINE Vector Vector::MultiplyAdd(Vector factor, Vector addend) const noexcept
 {
-#if defined(VX_MATH_RELAXED_FMA)
+#if defined(VX_MATH_RELAXED_SIMD)
     return Vector{ wasm_f32x4_relaxed_madd(data, factor.data, addend.data) };
 #else
     return Vector{ wasm_f32x4_add(wasm_f32x4_mul(data, factor.data), addend.data) };
@@ -295,7 +381,7 @@ VX_MATH_FORCEINLINE Vector Vector::Cross(Vector other) const noexcept
 VX_MATH_FORCEINLINE Vector Vector::Lerp(Vector target, float t) const noexcept
 {
     const v128_t diff = wasm_f32x4_sub(target.data, data);
-#if defined(VX_MATH_RELAXED_FMA)
+#if defined(VX_MATH_RELAXED_SIMD)
     return Vector{ wasm_f32x4_relaxed_madd(diff, wasm_f32x4_splat(t), data) };
 #else
     return Vector{ wasm_f32x4_add(data, wasm_f32x4_mul(diff, wasm_f32x4_splat(t))) };
@@ -310,28 +396,51 @@ VX_MATH_FORCEINLINE Vector Vector::Reflect(Vector normal) const noexcept
 {
     static_assert(N >= 2 && N <= 4, "Reflect dimensionality must be 2, 3, or 4");
     const v128_t scaledDot = wasm_f32x4_mul(DotVec<N>(normal).Data(), wasm_f32x4_splat(2.0f));
-#if defined(VX_MATH_RELAXED_FMA)
+#if defined(VX_MATH_RELAXED_SIMD)
     return Vector{ wasm_f32x4_relaxed_nmadd(normal.data, scaledDot, data) };
 #else
     return Vector{ wasm_f32x4_sub(data, wasm_f32x4_mul(normal.data, scaledDot)) };
 #endif
 }
 
-// pmin/pmax rather than min/max throughout. wasm_f32x4_min/max implement IEEE-754 NaN-propagating
-// semantics and lower to a multi-instruction sequence; pmin/pmax are single instructions with the
-// C-style "a < b ? a : b" behaviour that graphics code actually wants.
-// The tradeoff is that NaN handling is unspecified here and differs from the DirectXMath backend
-// (whose _mm_min_ps/_mm_max_ps have their own third behaviour). A NaN reaching these is already a
-// bug upstream; none of the four is safe to lean on for NaN scrubbing on either backend.
+// Not wasm_f32x4_min/max: those implement IEEE-754 NaN propagation and lower to a multi-instruction
+// sequence. relaxed_min/max are single instructions where available, pmin/pmax otherwise, and both
+// give the C-style "a < b ? a : b" behaviour graphics code actually wants.
+//
+// The tradeoff is that NaN and signed-zero handling is unspecified across these four, and differs
+// from the DirectXMath backend (whose _mm_min_ps/_mm_max_ps have their own third behaviour). A NaN
+// reaching them is already a bug upstream; none is safe to lean on for NaN scrubbing on either
+// backend. Use IsNaN() and Select() if you need to actually handle one.
+namespace detail
+{
+    VX_MATH_FORCEINLINE v128_t FastMin(v128_t a, v128_t b) noexcept
+    {
+#if defined(VX_MATH_RELAXED_SIMD)
+        return wasm_f32x4_relaxed_min(a, b);
+#else
+        return wasm_f32x4_pmin(a, b);
+#endif
+    }
+
+    VX_MATH_FORCEINLINE v128_t FastMax(v128_t a, v128_t b) noexcept
+    {
+#if defined(VX_MATH_RELAXED_SIMD)
+        return wasm_f32x4_relaxed_max(a, b);
+#else
+        return wasm_f32x4_pmax(a, b);
+#endif
+    }
+} // namespace detail
+
 VX_MATH_FORCEINLINE Vector Vector::Clamp(Vector min, Vector max) const noexcept
 {
-    return Vector{ wasm_f32x4_pmin(wasm_f32x4_pmax(data, min.data), max.data) };
+    return Vector{ detail::FastMin(detail::FastMax(data, min.data), max.data) };
 }
 
 VX_MATH_FORCEINLINE Vector Vector::Saturate() const noexcept
 {
-    return Vector{ wasm_f32x4_pmin(wasm_f32x4_pmax(data, wasm_f32x4_splat(0.0f)),
-                                   wasm_f32x4_splat(1.0f)) };
+    return Vector{ detail::FastMin(detail::FastMax(data, wasm_f32x4_const_splat(0.0f)),
+                                   wasm_f32x4_const_splat(1.0f)) };
 }
 
 VX_MATH_FORCEINLINE Vector Vector::Abs() const noexcept
@@ -341,12 +450,12 @@ VX_MATH_FORCEINLINE Vector Vector::Abs() const noexcept
 
 VX_MATH_FORCEINLINE Vector Vector::Min(Vector other) const noexcept
 {
-    return Vector{ wasm_f32x4_pmin(data, other.data) };
+    return Vector{ detail::FastMin(data, other.data) };
 }
 
 VX_MATH_FORCEINLINE Vector Vector::Max(Vector other) const noexcept
 {
-    return Vector{ wasm_f32x4_pmax(data, other.data) };
+    return Vector{ detail::FastMax(data, other.data) };
 }
 
 // No native SIMD pow in WASM SIMD128 - per-lane std::pow. Not remotely as
@@ -385,9 +494,210 @@ VX_MATH_FORCEINLINE Vector Vector::Pow(Vector base, Vector exponent) noexcept
     return base.Pow(exponent);
 }
 
+VX_MATH_FORCEINLINE Vector Vector::Infinity() noexcept
+{
+    return Vector{ wasm_f32x4_const_splat(std::numeric_limits<float>::infinity()) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::QuietNaN() noexcept
+{
+    return Vector{ wasm_f32x4_const_splat(std::numeric_limits<float>::quiet_NaN()) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Epsilon() noexcept
+{
+    return Vector{ wasm_f32x4_const_splat(std::numeric_limits<float>::epsilon()) };
+}
+
+// ================================
+// Comparisons
+// ================================
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareEqual(Vector other) const noexcept
+{
+    return VectorMask{ wasm_f32x4_eq(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareNotEqual(Vector other) const noexcept
+{
+    return VectorMask{ wasm_f32x4_ne(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareLess(Vector other) const noexcept
+{
+    return VectorMask{ wasm_f32x4_lt(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareLessOrEqual(Vector other) const noexcept
+{
+    return VectorMask{ wasm_f32x4_le(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareGreater(Vector other) const noexcept
+{
+    return VectorMask{ wasm_f32x4_gt(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareGreaterOrEqual(Vector other) const noexcept
+{
+    return VectorMask{ wasm_f32x4_ge(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareNearEqual(Vector other, Vector epsilon) const noexcept
+{
+    const v128_t difference = wasm_f32x4_abs(wasm_f32x4_sub(data, other.data));
+    return VectorMask{ wasm_f32x4_le(difference, epsilon.data) };
+}
+
+// A NaN is the only value that compares unequal to itself
+VX_MATH_FORCEINLINE VectorMask Vector::IsNaN() const noexcept
+{
+    return VectorMask{ wasm_f32x4_ne(data, data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::IsInfinite() const noexcept
+{
+    const v128_t magnitude = wasm_f32x4_abs(data);
+    return VectorMask{ wasm_f32x4_eq(magnitude, wasm_f32x4_const_splat(std::numeric_limits<float>::infinity())) };
+}
+
+// ================================
+// Bit manipulation (lanes as bit patterns, not numbers)
+// ================================
+
+VX_MATH_FORCEINLINE Vector Vector::AndInt(Vector other) const noexcept
+{
+    return Vector{ wasm_v128_and(data, other.data) };
+}
+
+// Note the operand order: this clears the bits that `other` has set, i.e. `~other & this`
+VX_MATH_FORCEINLINE Vector Vector::AndNotInt(Vector other) const noexcept
+{
+    return Vector{ wasm_v128_andnot(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::OrInt(Vector other) const noexcept
+{
+    return Vector{ wasm_v128_or(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::XorInt(Vector other) const noexcept
+{
+    return Vector{ wasm_v128_xor(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::NorInt(Vector other) const noexcept
+{
+    return Vector{ wasm_v128_not(wasm_v128_or(data, other.data)) };
+}
+
+// ================================
+// Rounding
+// ================================
+// All four are single native instructions on wasm, where SSE needs SSE4.1's _mm_round_ps
+
+VX_MATH_FORCEINLINE Vector Vector::Round() const noexcept
+{
+    return Vector{ wasm_f32x4_nearest(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Truncate() const noexcept
+{
+    return Vector{ wasm_f32x4_trunc(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Floor() const noexcept
+{
+    return Vector{ wasm_f32x4_floor(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Ceil() const noexcept
+{
+    return Vector{ wasm_f32x4_ceil(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Mod(Vector divisor) const noexcept
+{
+    const v128_t quotient = wasm_f32x4_trunc(wasm_f32x4_div(data, divisor.data));
+    return Vector{ detail::NegMulAdd(quotient, divisor.data, data) };
+}
+
+// x - 2pi * round(x / 2pi). Round-to-nearest is what makes this land in [-pi, pi] rather than
+// [0, 2pi) - truncation toward zero would leave the negative half unreduced
+VX_MATH_FORCEINLINE Vector Vector::ModAngles() const noexcept
+{
+    constexpr float k_TwoPi = 2.0f * std::numbers::pi_v<float>;
+    constexpr float k_ReciprocalTwoPi = 1.0f / k_TwoPi;
+
+    const v128_t revolutions = wasm_f32x4_nearest(
+        wasm_f32x4_mul(data, wasm_f32x4_const_splat(k_ReciprocalTwoPi)));
+    return Vector{ detail::NegMulAdd(revolutions, wasm_f32x4_const_splat(k_TwoPi), data) };
+}
+
+// ================================
+// Lane movement
+// ================================
+
+VX_MATH_FORCEINLINE Vector Vector::SplatX() const noexcept
+{
+    return Vector{ wasm_i32x4_shuffle(data, data, 0, 0, 0, 0) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::SplatY() const noexcept
+{
+    return Vector{ wasm_i32x4_shuffle(data, data, 1, 1, 1, 1) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::SplatZ() const noexcept
+{
+    return Vector{ wasm_i32x4_shuffle(data, data, 2, 2, 2, 2) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::SplatW() const noexcept
+{
+    return Vector{ wasm_i32x4_shuffle(data, data, 3, 3, 3, 3) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::MergeXY(Vector other) const noexcept
+{
+    return Vector{ wasm_i32x4_shuffle(data, other.data, 0, 4, 1, 5) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::MergeZW(Vector other) const noexcept
+{
+    return Vector{ wasm_i32x4_shuffle(data, other.data, 2, 6, 3, 7) };
+}
+
+template<int X, int Y, int Z, int W>
+VX_MATH_FORCEINLINE Vector Vector::Swizzle() const noexcept
+{
+    static_assert(X >= 0 && X <= 3 && Y >= 0 && Y <= 3 && Z >= 0 && Z <= 3 && W >= 0 && W <= 3,
+                  "Swizzle lane indices must be 0-3");
+    return Vector{ wasm_i32x4_shuffle(data, data, X, Y, Z, W) };
+}
+
+template<int X, int Y, int Z, int W>
+VX_MATH_FORCEINLINE Vector Vector::Permute(Vector other) const noexcept
+{
+    static_assert(X >= 0 && X <= 7 && Y >= 0 && Y <= 7 && Z >= 0 && Z <= 7 && W >= 0 && W <= 7,
+                  "Permute lane indices must be 0-7 (0-3 select this vector, 4-7 select the other)");
+    return Vector{ wasm_i32x4_shuffle(data, other.data, X, Y, Z, W) };
+}
+
 // ================================
 // Free Function Implementations (Vector)
 // ================================
+
+VX_MATH_FORCEINLINE Vector Select(VectorMask mask, Vector when_clear, Vector when_set) noexcept
+{
+#if defined(VX_MATH_RELAXED_SIMD)
+    // relaxed_laneselect leaves non-canonical masks implementation-defined, which is fine: every
+    // mask reaching here came out of a comparison instruction and is all-zeros or all-ones per lane
+    return Vector{ wasm_i32x4_relaxed_laneselect(when_set.Data(), when_clear.Data(), mask.Data()) };
+#else
+    return Vector{ wasm_v128_bitselect(when_set.Data(), when_clear.Data(), mask.Data()) };
+#endif
+}
 
 VX_MATH_FORCEINLINE Vector operator*(float scalar, Vector vec) noexcept
 {
@@ -572,7 +882,7 @@ namespace detail
     // result = sum_i row[i] * mat.row(i)
     VX_MATH_FORCEINLINE v128_t MulRowByMatrix(v128_t row, const v128_t m[4]) noexcept
     {
-#if defined(VX_MATH_RELAXED_FMA)
+#if defined(VX_MATH_RELAXED_SIMD)
         v128_t r = wasm_f32x4_mul(wasm_i32x4_shuffle(row, row, 0, 0, 0, 0), m[0]);
         r = wasm_f32x4_relaxed_madd(wasm_i32x4_shuffle(row, row, 1, 1, 1, 1), m[1], r);
         r = wasm_f32x4_relaxed_madd(wasm_i32x4_shuffle(row, row, 2, 2, 2, 2), m[2], r);

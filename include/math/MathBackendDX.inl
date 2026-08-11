@@ -6,6 +6,91 @@
 namespace velox::math
 {
 // ================================
+// VectorMask Implementation (DirectXMath)
+// ================================
+
+VX_MATH_FORCEINLINE VectorMask::VectorMask() noexcept
+    : data{ DirectX::XMVectorZero() }
+{
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::operator&(VectorMask rhs) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorAndInt(data, rhs.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::operator|(VectorMask rhs) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorOrInt(data, rhs.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::operator^(VectorMask rhs) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorXorInt(data, rhs.data) };
+}
+
+// DirectXMath has no XMVectorNotInt; NOR against itself gives ~(v | v) == ~v
+VX_MATH_FORCEINLINE VectorMask VectorMask::operator~() const noexcept
+{
+    return VectorMask{ DirectX::XMVectorNorInt(data, data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask& VectorMask::operator&=(VectorMask rhs) noexcept
+{
+    data = DirectX::XMVectorAndInt(data, rhs.data);
+    return *this;
+}
+
+VX_MATH_FORCEINLINE VectorMask& VectorMask::operator|=(VectorMask rhs) noexcept
+{
+    data = DirectX::XMVectorOrInt(data, rhs.data);
+    return *this;
+}
+
+VX_MATH_FORCEINLINE VectorMask& VectorMask::operator^=(VectorMask rhs) noexcept
+{
+    data = DirectX::XMVectorXorInt(data, rhs.data);
+    return *this;
+}
+
+VX_MATH_FORCEINLINE uint32_t VectorMask::LaneBits() const noexcept
+{
+    return static_cast<uint32_t>(_mm_movemask_ps(data));
+}
+
+namespace detail
+{
+    template<int N>
+    constexpr uint32_t LaneBitsFor() noexcept
+    {
+        static_assert(N >= 2 && N <= 4, "Mask width must be 2, 3, or 4");
+        return (1u << N) - 1u;
+    }
+} // namespace detail
+
+template<int N>
+VX_MATH_FORCEINLINE bool VectorMask::AllTrue() const noexcept
+{
+    return (LaneBits() & detail::LaneBitsFor<N>()) == detail::LaneBitsFor<N>();
+}
+
+template<int N>
+VX_MATH_FORCEINLINE bool VectorMask::AnyTrue() const noexcept
+{
+    return (LaneBits() & detail::LaneBitsFor<N>()) != 0u;
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::AllSet() noexcept
+{
+    return VectorMask{ DirectX::XMVectorTrueInt() };
+}
+
+VX_MATH_FORCEINLINE VectorMask VectorMask::AllClear() noexcept
+{
+    return VectorMask{ DirectX::XMVectorFalseInt() };
+}
+
+// ================================
 // Vector SIMD Implementation (DirectXMath)
 // ================================
 
@@ -92,7 +177,7 @@ VX_MATH_FORCEINLINE Vector Vector::operator-() const noexcept
     return Vector{ DirectX::XMVectorNegate(data) };
 }
 
-// VX_MATH_RELAXED_FMA has no effect on this backend: XMVectorMultiplyAdd
+// VX_MATH_RELAXED_SIMD has no effect on this backend: XMVectorMultiplyAdd
 // already lowers to a hardware FMA instruction when the target/compiler
 // flags support it, with no separate "relaxed" mode to opt into.
 VX_MATH_FORCEINLINE Vector Vector::MultiplyAdd(Vector factor, Vector addend) const noexcept
@@ -292,9 +377,193 @@ VX_MATH_FORCEINLINE Vector Vector::Pow(Vector base, Vector exponent) noexcept
     return Vector{ DirectX::XMVectorPow(base.data, exponent.data) };
 }
 
+VX_MATH_FORCEINLINE Vector Vector::Infinity() noexcept
+{
+    return Vector{ DirectX::XMVectorSplatInfinity() };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::QuietNaN() noexcept
+{
+    return Vector{ DirectX::XMVectorSplatQNaN() };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Epsilon() noexcept
+{
+    return Vector{ DirectX::XMVectorSplatEpsilon() };
+}
+
+// ================================
+// Comparisons
+// ================================
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareEqual(Vector other) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorEqual(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareNotEqual(Vector other) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorNotEqual(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareLess(Vector other) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorLess(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareLessOrEqual(Vector other) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorLessOrEqual(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareGreater(Vector other) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorGreater(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareGreaterOrEqual(Vector other) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorGreaterOrEqual(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::CompareNearEqual(Vector other, Vector epsilon) const noexcept
+{
+    return VectorMask{ DirectX::XMVectorNearEqual(data, other.data, epsilon.data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::IsNaN() const noexcept
+{
+    return VectorMask{ DirectX::XMVectorIsNaN(data) };
+}
+
+VX_MATH_FORCEINLINE VectorMask Vector::IsInfinite() const noexcept
+{
+    return VectorMask{ DirectX::XMVectorIsInfinite(data) };
+}
+
+// ================================
+// Bit manipulation (lanes as bit patterns, not numbers)
+// ================================
+
+VX_MATH_FORCEINLINE Vector Vector::AndInt(Vector other) const noexcept
+{
+    return Vector{ DirectX::XMVectorAndInt(data, other.data) };
+}
+
+// Clears the bits that `other` has set, i.e. `~other & this` - DirectXMath spells this AndCInt
+VX_MATH_FORCEINLINE Vector Vector::AndNotInt(Vector other) const noexcept
+{
+    return Vector{ DirectX::XMVectorAndCInt(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::OrInt(Vector other) const noexcept
+{
+    return Vector{ DirectX::XMVectorOrInt(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::XorInt(Vector other) const noexcept
+{
+    return Vector{ DirectX::XMVectorXorInt(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::NorInt(Vector other) const noexcept
+{
+    return Vector{ DirectX::XMVectorNorInt(data, other.data) };
+}
+
+// ================================
+// Rounding
+// ================================
+
+VX_MATH_FORCEINLINE Vector Vector::Round() const noexcept
+{
+    return Vector{ DirectX::XMVectorRound(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Truncate() const noexcept
+{
+    return Vector{ DirectX::XMVectorTruncate(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Floor() const noexcept
+{
+    return Vector{ DirectX::XMVectorFloor(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Ceil() const noexcept
+{
+    return Vector{ DirectX::XMVectorCeiling(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::Mod(Vector divisor) const noexcept
+{
+    return Vector{ DirectX::XMVectorMod(data, divisor.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::ModAngles() const noexcept
+{
+    return Vector{ DirectX::XMVectorModAngles(data) };
+}
+
+// ================================
+// Lane movement
+// ================================
+
+VX_MATH_FORCEINLINE Vector Vector::SplatX() const noexcept
+{
+    return Vector{ DirectX::XMVectorSplatX(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::SplatY() const noexcept
+{
+    return Vector{ DirectX::XMVectorSplatY(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::SplatZ() const noexcept
+{
+    return Vector{ DirectX::XMVectorSplatZ(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::SplatW() const noexcept
+{
+    return Vector{ DirectX::XMVectorSplatW(data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::MergeXY(Vector other) const noexcept
+{
+    return Vector{ DirectX::XMVectorMergeXY(data, other.data) };
+}
+
+VX_MATH_FORCEINLINE Vector Vector::MergeZW(Vector other) const noexcept
+{
+    return Vector{ DirectX::XMVectorMergeZW(data, other.data) };
+}
+
+template<int X, int Y, int Z, int W>
+VX_MATH_FORCEINLINE Vector Vector::Swizzle() const noexcept
+{
+    static_assert(X >= 0 && X <= 3 && Y >= 0 && Y <= 3 && Z >= 0 && Z <= 3 && W >= 0 && W <= 3,
+                  "Swizzle lane indices must be 0-3");
+    return Vector{ DirectX::XMVectorSwizzle<X, Y, Z, W>(data) };
+}
+
+template<int X, int Y, int Z, int W>
+VX_MATH_FORCEINLINE Vector Vector::Permute(Vector other) const noexcept
+{
+    static_assert(X >= 0 && X <= 7 && Y >= 0 && Y <= 7 && Z >= 0 && Z <= 7 && W >= 0 && W <= 7,
+                  "Permute lane indices must be 0-7 (0-3 select this vector, 4-7 select the other)");
+    return Vector{ DirectX::XMVectorPermute<X, Y, Z, W>(data, other.data) };
+}
+
 // ================================
 // Free Function Implementations (Vector)
 // ================================
+
+// XMVectorSelect takes the first argument where the control bit is clear, the second where it is set
+VX_MATH_FORCEINLINE Vector Select(VectorMask mask, Vector when_clear, Vector when_set) noexcept
+{
+    return Vector{ DirectX::XMVectorSelect(when_clear.Data(), when_set.Data(), mask.Data()) };
+}
 
 VX_MATH_FORCEINLINE Vector operator*(float scalar, Vector vec) noexcept
 {

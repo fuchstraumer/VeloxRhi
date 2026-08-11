@@ -182,7 +182,10 @@ std::unique_ptr<MeshData> CreateIcosphere(size_t detail_level)
 
         Vector pos1 = ToVector(positions[v1]);
         Vector pos2 = ToVector(positions[v2]);
-        Vector mid = (pos1 + pos2).Normalize<4>();
+        // Normalize<3>, not <4>: both operands are homogeneous points with w == 1, so their sum has
+        // w == 2, and Normalize<4> would divide by sqrt(x^2 + y^2 + z^2 + 4) - pulling the midpoint
+        // well inside the unit sphere instead of onto it
+        Vector mid = (pos1 + pos2).Normalize<3>();
         Float4 midpoint = FromVector(mid);
         midpoint.w = 1.0f;
         positions.push_back(midpoint);

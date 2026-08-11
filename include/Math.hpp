@@ -2,9 +2,11 @@
 #ifndef VELOX_RHI_MATH_HPP
 #define VELOX_RHI_MATH_HPP
 #include <cstddef>
+#include <cstdint>
 #include <cmath>
 #include <cassert>
 #include <limits>
+#include <numbers>
 #include <utility>
 
 // needed early to prefix the swizzle accessors
@@ -40,13 +42,15 @@
     #include <DirectXMath.h>
 #endif
 
-// VX_MATH_RELAXED_FMA selects relaxed-simd fused multiply-add
-// (wasm_f32x4_relaxed_madd / relaxed_nmadd) on the WASM backend. Defined by the
-// VELOX_RHI_MATH_RELAXED_SIMD CMake option, which also passes -mrelaxed-simd -
-// the builtins do not compile without that flag, so never define this by hand.
-// this is mostly fully supported across browsers, but not 100% yet, so it's off by default
-// todo-ship: consider adding a runtime check for relaxed-simd support, and
-// using that to select the backend at runtime
+// VX_MATH_RELAXED_SIMD opts the WASM backend into relaxed-simd: fused multiply-add
+// (relaxed_madd / relaxed_nmadd), relaxed_min / relaxed_max, relaxed_trunc, and
+// relaxed_laneselect. Every use has a plain-SIMD #else fallback.
+// Defined by the VELOX_RHI_MATH_RELAXED_SIMD CMake option (ON by default), which also passes
+// -mrelaxed-simd - the builtins do not compile without that flag, so never define this by hand.
+// NOTE this does not degrade gracefully at runtime: a module containing relaxed opcodes fails
+// validation outright on an engine without support rather than falling back. Chrome 114+,
+// Firefox 120+ and Safari 18+ are fine; older mobile browsers will refuse to load the module.
+// todo-ship: consider a runtime capability check with two compiled variants
 // Use analytical solutions and approximations in key locations to reduce
 // instruction count (called SHORTCUTS because there's a few diff types of opts, not just approximation)
 #define VX_MATH_USE_SHORTCUTS
@@ -91,8 +95,8 @@ struct Matrix;
  *   approximate sqrt/rsqrt intrinsic; would need a hand-rolled fast-inverse-sqrt.
  * - Vector::Refract<N> - no native intrinsic on the WASM side and
  *   comparatively rarely used
- * - Vector::Epsilon(), Vector::AlmostEqual(Vector) removed
- * - Vector::AlmostEqual(Vector, float) Vector::AlmostZero() also removed
+ * - Vector::AlmostEqual(Vector), AlmostEqual(Vector, float), AlmostZero() removed;
+ *   CompareNearEqual + VectorMask::AllTrue<N> covers these now
  * -----------------------------------------------------------------------
  * Also worth flagging (pre-existing in the source, preserved as-is):
  * -----------------------------------------------------------------------
@@ -298,6 +302,66 @@ public:
 };
 
 /**
+ * Lane-wise boolean result of a Vector comparison. Every lane holds either all-zero or all-one bits.
+ *
+ * Deliberately a distinct type rather than a reused Vector, which is what DirectXMath does with
+ * XMVECTOR. Arithmetic on a mask is always a bug, and so is passing a mask where a coordinate
+ * belongs - both are meaningless but perfectly well-formed if the type is Vector. Hence: no
+ * arithmetic operators here at all. Combine masks with the bitwise operators, consume them with
+ * Select() or AllTrue/AnyTrue.
+ *
+ * Not to be confused with Vector's AndInt/OrInt/XorInt, which treat a float vector as raw bits for
+ * exponent and sign manipulation. That is a different operation from combining predicates.
+ */
+struct alignas(16) VectorMask
+{
+public:
+    VectorMask() noexcept;
+#if VX_MATH_BACKEND_WASM
+    VectorMask(v128_t mask) noexcept : data{mask} {}
+    v128_t Data() const noexcept { return data; }
+#else
+    VectorMask(DirectX::XMVECTOR mask) noexcept : data{mask} {}
+    DirectX::XMVECTOR Data() const noexcept { return data; }
+#endif
+
+    VectorMask(const VectorMask& other) noexcept = default;
+    VectorMask(VectorMask&& other) noexcept = default;
+    VectorMask& operator=(const VectorMask& other) noexcept = default;
+    VectorMask& operator=(VectorMask&& other) noexcept = default;
+
+    VectorMask operator&(VectorMask rhs) const noexcept;
+    VectorMask operator|(VectorMask rhs) const noexcept;
+    VectorMask operator^(VectorMask rhs) const noexcept;
+    VectorMask operator~() const noexcept;
+
+    VectorMask& operator&=(VectorMask rhs) noexcept;
+    VectorMask& operator|=(VectorMask rhs) noexcept;
+    VectorMask& operator^=(VectorMask rhs) noexcept;
+
+    /** @brief True when every one of the first N lanes is set */
+    template<int N>
+    bool AllTrue() const noexcept;
+
+    /** @brief True when any of the first N lanes is set */
+    template<int N>
+    bool AnyTrue() const noexcept;
+
+    /** @brief One bit per lane, lane 0 in bit 0. Useful for switching on a comparison result */
+    uint32_t LaneBits() const noexcept;
+
+    static VectorMask AllSet() noexcept;
+    static VectorMask AllClear() noexcept;
+
+private:
+#if VX_MATH_BACKEND_WASM
+    v128_t data;
+#else
+    DirectX::XMVECTOR data;
+#endif
+};
+
+/**
  * SIMD Vector type - optimized for mathematical operations, backed by
  * either WASM SIMD128 (Emscripten builds) or DirectXMath (native builds).
  * This type should NOT be stored or persisted. Convert to storage types
@@ -355,7 +419,7 @@ public:
     Vector operator/(float scalar) const noexcept;
     Vector operator-() const noexcept;
 
-    // Gated on VX_MATH_RELAXED_FMA (see top of file); always available, the
+    // Gated on VX_MATH_RELAXED_SIMD (see top of file); always available, the
     // define only changes which instruction it lowers to on the WASM backend.
     Vector MultiplyAdd(Vector factor, Vector addend) const noexcept;
 
@@ -402,12 +466,60 @@ public:
     Vector Pow(float exponent) const noexcept;
     Vector Pow(Vector exponent) const noexcept;
 
+    // Lane-wise comparisons. NaN operands compare false everywhere except CompareNotEqual
+    VectorMask CompareEqual(Vector other) const noexcept;
+    VectorMask CompareNotEqual(Vector other) const noexcept;
+    VectorMask CompareLess(Vector other) const noexcept;
+    VectorMask CompareLessOrEqual(Vector other) const noexcept;
+    VectorMask CompareGreater(Vector other) const noexcept;
+    VectorMask CompareGreaterOrEqual(Vector other) const noexcept;
+    VectorMask CompareNearEqual(Vector other, Vector epsilon) const noexcept;
+    VectorMask IsNaN() const noexcept;
+    VectorMask IsInfinite() const noexcept;
+
+    // Bit manipulation, treating the lanes as raw bit patterns rather than numbers. These exist mostly
+    // for exponent and sign work inside Exp2/Log2/Abs - for combining predicates, use VectorMask
+    Vector AndInt(Vector other) const noexcept;
+    Vector AndNotInt(Vector other) const noexcept;
+    Vector OrInt(Vector other) const noexcept;
+    Vector XorInt(Vector other) const noexcept;
+    Vector NorInt(Vector other) const noexcept;
+
+    // Rounding. Round is to-nearest-even, matching both backends' native instruction
+    Vector Round() const noexcept;
+    Vector Truncate() const noexcept;
+    Vector Floor() const noexcept;
+    Vector Ceil() const noexcept;
+    /** @brief Floating-point remainder of this / divisor, truncated toward zero */
+    Vector Mod(Vector divisor) const noexcept;
+    /** @brief Wraps each lane into [-pi, pi] */
+    Vector ModAngles() const noexcept;
+
+    Vector SplatX() const noexcept;
+    Vector SplatY() const noexcept;
+    Vector SplatZ() const noexcept;
+    Vector SplatW() const noexcept;
+    /** @brief (this.x, other.x, this.y, other.y) */
+    Vector MergeXY(Vector other) const noexcept;
+    /** @brief (this.z, other.z, this.w, other.w) */
+    Vector MergeZW(Vector other) const noexcept;
+
+    // Lane movement. Index template parameters are 0-3 for X-W
+    template<int X, int Y, int Z, int W>
+    Vector Swizzle() const noexcept;
+    // Lane movement with another vector: 0-3 for this vector, 4-7 for other vector
+    template<int X, int Y, int Z, int W>
+    Vector Permute(Vector other) const noexcept;
+
     static Vector Replicate(float scalar) noexcept;
     static Vector Zero() noexcept;
     static Vector Identity() noexcept;
     static Vector Abs(Vector vec) noexcept;
     static Vector Pow(Vector base, float exponent) noexcept;
     static Vector Pow(Vector base, Vector exponent) noexcept;
+    static Vector Infinity() noexcept;
+    static Vector QuietNaN() noexcept;
+    static Vector Epsilon() noexcept;
 
 private:
 #if VX_MATH_BACKEND_WASM
@@ -781,6 +893,13 @@ private:
     DirectX::XMMATRIX data;
 #endif
 };
+
+/**
+ * Per-lane choice between two vectors: lanes where `mask` is set take `when_set`, lanes where
+ * it is clear take `when_clear`. Allows computing both branches of a conditional in parallel
+ * and then masking out the result (just like GPUs like to do as well)
+ */
+Vector Select(VectorMask mask, Vector when_clear, Vector when_set) noexcept;
 
 // Vector transformation functions that use matrix and vector types together
 template<int N>
