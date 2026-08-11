@@ -100,8 +100,7 @@ VX_MATH_FORCEINLINE uint32_t VectorMask::LaneBits() const noexcept
     return static_cast<uint32_t>(wasm_i32x4_bitmask(data));
 }
 
-// AllTrue/AnyTrue go through the lane bitmask rather than wasm_i32x4_all_true, because the latter
-// always tests all four lanes and N may be 2 or 3. One bit per lane makes the width a simple mask.
+// Via the lane bitmask, not wasm_i32x4_all_true: that always tests all four lanes and N may be 2 or 3
 namespace detail
 {
     template<int N>
@@ -279,16 +278,12 @@ VX_MATH_FORCEINLINE Vector Vector::ReciprocalSqrt() const noexcept
     return Vector{ wasm_f32x4_div(wasm_f32x4_splat(1.0f), wasm_f32x4_sqrt(data)) };
 }
 
-// DotVec<N> reduces with a full-width butterfly rather than porting the SSE
-// _mm_add_ss sequences DirectXMath uses. WASM SIMD128 has no single-lane add, so
-// the butterfly is both cheaper and simpler here - and it leaves the result
-// splatted across all four lanes, which is what every caller downstream wants.
-// Lanes above N are masked off first, matching XMVector{2,3}Dot's guarantee that
-// unused lanes are ignored regardless of what garbage they hold.
+// Full-width butterfly, not a port of DirectXMath's _mm_add_ss sequences - wasm has no single-lane
+// add, and the butterfly leaves the result splatted, which is what callers want anyway. Lanes above N
+// are masked first: unused lanes are ignored regardless of what garbage they hold.
 namespace detail
 {
-    // Butterfly reduction: two shuffle/add pairs sum all four lanes and leave the
-    // total in every lane.
+    // two shuffle/add pairs sum all four lanes, total ending up in every one
     VX_MATH_FORCEINLINE v128_t HorizontalSum4(v128_t vec) noexcept
     {
         vec = wasm_f32x4_add(vec, wasm_i32x4_shuffle(vec, vec, 2, 3, 0, 1));
@@ -354,10 +349,8 @@ VX_MATH_FORCEINLINE float Vector::Length() const noexcept
     return std::sqrt(Dot<N>(*this));
 }
 
-// DotVec<N> already splats the squared length across every lane, so the divide
-// stays in the vector domain - no lane extraction, no scalar sqrt, no re-splat.
-// A zero-length input yields infinities/NaN here, matching the WASM backend's
-// no-special-cases stance rather than DirectXMath's XMVector3Normalize.
+// DotVec splats the squared length, so the divide stays in the vector domain - no lane extraction,
+// no scalar sqrt. Zero length yields infinities rather than being special-cased.
 template<int N>
 VX_MATH_FORCEINLINE Vector Vector::Normalize() const noexcept
 {
@@ -388,9 +381,7 @@ VX_MATH_FORCEINLINE Vector Vector::Lerp(Vector target, float t) const noexcept
 #endif
 }
 
-// incident - 2 * dot(incident, normal) * normal, kept entirely in the vector
-// domain off the back of DotVec's splatted result. relaxed_nmadd computes
-// -(a * b) + c, which is exactly this expression in one instruction.
+// incident - 2 * dot(incident, normal) * normal. relaxed_nmadd is -(a * b) + c, i.e. this in one op
 template<int N>
 VX_MATH_FORCEINLINE Vector Vector::Reflect(Vector normal) const noexcept
 {
@@ -403,14 +394,11 @@ VX_MATH_FORCEINLINE Vector Vector::Reflect(Vector normal) const noexcept
 #endif
 }
 
-// Not wasm_f32x4_min/max: those implement IEEE-754 NaN propagation and lower to a multi-instruction
-// sequence. relaxed_min/max are single instructions where available, pmin/pmax otherwise, and both
-// give the C-style "a < b ? a : b" behaviour graphics code actually wants.
+// Not wasm_f32x4_min/max: those propagate NaN per IEEE-754 and lower to several instructions.
+// relaxed_min/max and pmin/pmax give the C-style "a < b ? a : b" that graphics code wants.
 //
-// The tradeoff is that NaN and signed-zero handling is unspecified across these four, and differs
-// from the DirectXMath backend (whose _mm_min_ps/_mm_max_ps have their own third behaviour). A NaN
-// reaching them is already a bug upstream; none is safe to lean on for NaN scrubbing on either
-// backend. Use IsNaN() and Select() if you need to actually handle one.
+// Consequence: NaN and signed-zero handling is unspecified here, and differs again on DirectXMath.
+// None of Min/Max/Clamp/Saturate is safe for NaN scrubbing - use IsNaN() and Select() for that.
 namespace detail
 {
     VX_MATH_FORCEINLINE v128_t FastMin(v128_t a, v128_t b) noexcept
@@ -509,9 +497,6 @@ VX_MATH_FORCEINLINE Vector Vector::Epsilon() noexcept
     return Vector{ wasm_f32x4_const_splat(std::numeric_limits<float>::epsilon()) };
 }
 
-// ================================
-// Comparisons
-// ================================
 
 VX_MATH_FORCEINLINE VectorMask Vector::CompareEqual(Vector other) const noexcept
 {
@@ -561,9 +546,6 @@ VX_MATH_FORCEINLINE VectorMask Vector::IsInfinite() const noexcept
     return VectorMask{ wasm_f32x4_eq(magnitude, wasm_f32x4_const_splat(std::numeric_limits<float>::infinity())) };
 }
 
-// ================================
-// Bit manipulation (lanes as bit patterns, not numbers)
-// ================================
 
 VX_MATH_FORCEINLINE Vector Vector::AndInt(Vector other) const noexcept
 {
@@ -591,9 +573,6 @@ VX_MATH_FORCEINLINE Vector Vector::NorInt(Vector other) const noexcept
     return Vector{ wasm_v128_not(wasm_v128_or(data, other.data)) };
 }
 
-// ================================
-// Rounding
-// ================================
 // All four are single native instructions on wasm, where SSE needs SSE4.1's _mm_round_ps
 
 VX_MATH_FORCEINLINE Vector Vector::Round() const noexcept
@@ -634,9 +613,6 @@ VX_MATH_FORCEINLINE Vector Vector::ModAngles() const noexcept
     return Vector{ detail::NegMulAdd(revolutions, wasm_f32x4_const_splat(k_TwoPi), data) };
 }
 
-// ================================
-// Lane movement
-// ================================
 
 VX_MATH_FORCEINLINE Vector Vector::SplatX() const noexcept
 {
@@ -796,10 +772,9 @@ VX_MATH_FORCEINLINE void Matrix::SetRow(size_t index, Vector row) noexcept
     data[index] = row.Data();
 }
 
-// wasm_f32x4_extract_lane/replace_lane encode the lane as an instruction immediate, so they need a
-// compile-time constant. Dispatching over the four constants keeps the value in a register; the
-// obvious alternative - storing the row to a local array and indexing it - cannot be promoted out
-// of memory when the index is a runtime value, so it pays a full store/load round trip every call.
+// extract_lane/replace_lane encode the lane as an immediate, so it must be a compile-time constant.
+// Dispatching over the four keeps the value in a register; indexing a local array instead cannot be
+// promoted out of memory when the index is a runtime value, costing a store/load round trip per call.
 namespace detail
 {
     VX_MATH_FORCEINLINE float ExtractLane(v128_t vec, size_t lane) noexcept
@@ -974,15 +949,13 @@ VX_MATH_FORCEINLINE Matrix Matrix::Transpose() const noexcept
                    wasm_i32x4_shuffle(tmp2, tmp3, 2, 3, 6, 7) };
 }
 
-// Cofactor expansion over the transpose, ported from XMMatrixInverse in DirectXMath
-// (MIT-licensed, Microsoft; see DirectXMathMatrix.inl in the Windows SDK). Replaces a scalar
-// Gauss-Jordan elimination: branch-free, no stack round trip, and shares the algorithm with the
-// DirectX backend so the two agree closely. The generic path there is written in terms of
-// XMVectorSwizzle/XMVectorPermute, whose lane encodings map exactly onto wasm_i32x4_shuffle -
-// a two-source permute indexes the second operand with 4..7, same as wasm.
+// Cofactor expansion over the transpose, ported from XMMatrixInverse (MIT, Microsoft;
+// DirectXMathMatrix.inl in the Windows SDK). Branch-free and no stack round trip, unlike the
+// Gauss-Jordan it replaced. Its XMVectorSwizzle/XMVectorPermute lane encodings map exactly onto
+// wasm_i32x4_shuffle, including 4..7 indexing the second operand.
 //
-// Singular input is NOT special-cased: the determinant reciprocal becomes an infinity and the
-// result fills with infinities and NaNs. Check Determinant() first if that matters.
+// Singular input is not special-cased: the result fills with infinities and NaNs. Check Determinant()
+// first if that matters.
 VX_MATH_FORCEINLINE Matrix Matrix::Inverse() const noexcept
 {
     const Matrix transposed = Transpose();
@@ -1054,7 +1027,7 @@ VX_MATH_FORCEINLINE Matrix Matrix::Inverse() const noexcept
     const v128_t c7 = detail::MulAdd(v43, v53, c6);
     c6 = detail::NegMulAdd(v43, v53, c6);
 
-    // interleave the even/odd cofactor halves: lanes 0 and 2 from the first, 1 and 3 from the second
+    // interleave the even/odd cofactor halves
     const v128_t row0 = wasm_i32x4_shuffle(c0, c1, 0, 5, 2, 7);
     const v128_t row1 = wasm_i32x4_shuffle(c2, c3, 0, 5, 2, 7);
     const v128_t row2 = wasm_i32x4_shuffle(c4, c5, 0, 5, 2, 7);
@@ -1111,11 +1084,13 @@ VX_MATH_FORCEINLINE Matrix Matrix::Scale(float uniform_scale) noexcept
     return Scale(uniform_scale, uniform_scale, uniform_scale);
 }
 
-// Row-vector, row-major rotation matrices (matching DirectXMath's
-// XMMatrixRotationX/Y/Z convention).
+// Row-vector, row-major, matching DirectXMath's XMMatrixRotationX/Y/Z. SinCos rather than separate
+// sin and cos calls: they share one range reduction, so the pair costs about 1.3x one of them.
 VX_MATH_FORCEINLINE Matrix Matrix::RotationX(float radians) noexcept
 {
-    float s = std::sin(radians), c = std::cos(radians);
+    const ScalarSinCos angle = SinCos(radians);
+    const float s = angle.sin;
+    const float c = angle.cos;
     return Matrix{ wasm_f32x4_make(1.0f, 0.0f, 0.0f, 0.0f),
                    wasm_f32x4_make(0.0f, c, s, 0.0f),
                    wasm_f32x4_make(0.0f, -s, c, 0.0f),
@@ -1124,7 +1099,9 @@ VX_MATH_FORCEINLINE Matrix Matrix::RotationX(float radians) noexcept
 
 VX_MATH_FORCEINLINE Matrix Matrix::RotationY(float radians) noexcept
 {
-    float s = std::sin(radians), c = std::cos(radians);
+    const ScalarSinCos angle = SinCos(radians);
+    const float s = angle.sin;
+    const float c = angle.cos;
     return Matrix{ wasm_f32x4_make(c, 0.0f, -s, 0.0f),
                    wasm_f32x4_make(0.0f, 1.0f, 0.0f, 0.0f),
                    wasm_f32x4_make(s, 0.0f, c, 0.0f),
@@ -1133,7 +1110,9 @@ VX_MATH_FORCEINLINE Matrix Matrix::RotationY(float radians) noexcept
 
 VX_MATH_FORCEINLINE Matrix Matrix::RotationZ(float radians) noexcept
 {
-    float s = std::sin(radians), c = std::cos(radians);
+    const ScalarSinCos angle = SinCos(radians);
+    const float s = angle.sin;
+    const float c = angle.cos;
     return Matrix{ wasm_f32x4_make(c, s, 0.0f, 0.0f),
                    wasm_f32x4_make(-s, c, 0.0f, 0.0f),
                    wasm_f32x4_make(0.0f, 0.0f, 1.0f, 0.0f),
@@ -1167,18 +1146,16 @@ VX_MATH_FORCEINLINE Matrix Matrix::RotationQuaternion(Quaternion rotation) noexc
     };
 }
 
-// Forwards to the quaternion form so the Euler composition order is defined in exactly one place
+// Forwards to the quaternion form so the composition order is defined in one place
 VX_MATH_FORCEINLINE Matrix Matrix::RotationRollPitchYaw(float pitch, float yaw, float roll) noexcept
 {
     return Matrix::RotationQuaternion(Quaternion::RotationRollPitchYaw(pitch, yaw, roll));
 }
 
-// Analytical S * R * T rather than three matrix constructions and two 4x4 multiplies.
-// Because S is diagonal, (S * R) is just each rotation row scaled by one scale component;
-// and because rows 0-2 of a rotation matrix have w == 0, the * T step leaves those rows
-// untouched and simply drops the translation into row 3. Three multiplies and a lane
-// write, versus ~90 emitted instructions - and more accurate, since the general path
-// accumulates rounding through dot products whose terms are almost all exact zeros.
+// Analytical S * R * T. S is diagonal, so (S * R) is each rotation row scaled by one component; rows
+// 0-2 of a rotation have w == 0, so the * T step only drops the translation into row 3. Three
+// multiplies and a lane write against ~90 emitted instructions, and more accurate too - the general
+// path accumulates rounding through dot products whose terms are nearly all exact zeros.
 VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Quaternion rotation_quaternion, Vector scale) noexcept
 {
     const Matrix rotation = Matrix::RotationQuaternion(rotation_quaternion);
@@ -1190,9 +1167,8 @@ VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Quaternion rotation_q
                    wasm_f32x4_replace_lane(translation.Data(), 3, 1.0f) };
 }
 
-// Rotating about rotation_origin instead of the local origin leaves the linear part
-// identical and only shifts the translation row: p * S * R + (t + Ro - Ro * R), where
-// Ro passes through the *unscaled* rotation.
+// A rotation origin leaves the linear part identical and only shifts the translation row to
+// t + Ro - Ro * R, with Ro passing through the *unscaled* rotation.
 VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation,
                                        Quaternion rotation_quaternion,
                                        Vector scale,
@@ -1379,8 +1355,7 @@ VX_MATH_FORCEINLINE Vector Transform(Vector vector, Matrix matrix) noexcept
         {
             data = wasm_f32x4_replace_lane(data, 3, 1.0f);
         }
-        // perspective divide stays in the vector domain - splat w across all lanes and divide,
-        // rather than extracting it to a scalar and re-splatting the reciprocal
+        // perspective divide stays in the vector domain: splat w and divide, no scalar round trip
         const v128_t transformed = (matrix * Vector{ data }).Data();
         return Vector{ wasm_f32x4_div(transformed,
                                       wasm_i32x4_shuffle(transformed, transformed, 3, 3, 3, 3)) };
@@ -1427,11 +1402,9 @@ VX_MATH_FORCEINLINE Matrix ToMatrix(const Float4x4& storage) noexcept
                    wasm_f32x4_make(m[3][0], m[3][1], m[3][2], m[3][3]) };
 }
 
-// Storing whole rows, rather than reading element by element. Matrix::operator[] takes a
-// runtime column index, so every one of those reads costs a full row store to the stack plus
-// a scalar load; sixteen of them is sixteen round trips where four vector stores will do.
-// The three-wide storage types have a row stride of 3 floats, so they take a 64-bit plus a
-// 32-bit lane store per row instead of one 128-bit store.
+// Whole-row stores. Element-by-element would go through Matrix::operator[], whose runtime column
+// index costs a row store plus a scalar load each time - sixteen round trips for four stores' work.
+// The three-wide types have a row stride of 3 floats, so they need a 64- plus a 32-bit lane store.
 namespace detail
 {
     VX_MATH_FORCEINLINE void StoreRowXYZ(float* dest, v128_t row) noexcept
@@ -1480,3 +1453,4 @@ VX_MATH_FORCEINLINE Float4x4 FromMatrix(const Matrix& mat) noexcept
 
 // Quaternion implementations live in their own file to keep this one navigable
 #include "math/QuaternionBackendWASM.inl"
+#include "math/TranscendentalBackendWASM.inl"

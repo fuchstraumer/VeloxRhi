@@ -1,9 +1,7 @@
 #pragma once
-// DirectXMath implementations for math::Quaternion. Included from the end of MathBackendDX.inl.
-// Include nothing here - see the note at the top of QuaternionBackendWASM.inl.
-//
-// Mostly thin forwarding to XMQuaternion*. Two deliberate exceptions, marked below, where matching
-// the WASM backend's *semantics* matters more than reusing DirectXMath's spelling.
+// DirectXMath implementations for math::Quaternion. Included from MathBackendDX.inl; include nothing.
+// Mostly forwarding to XMQuaternion*, with three marked exceptions where matching the WASM backend's
+// semantics matters more than reusing DirectXMath's spelling.
 namespace velox::math
 {
 
@@ -44,8 +42,7 @@ VX_MATH_FORCEINLINE float Quaternion::w() const noexcept
     return DirectX::XMVectorGetW(data);
 }
 
-// XMQuaternionMultiply(Q1, Q2) is documented as "rotate by Q1, then by Q2", which is exactly the
-// order this method promises, so the arguments pass straight through
+// XMQuaternionMultiply(Q1, Q2) is "rotate by Q1 then Q2", already the order this method promises
 VX_MATH_FORCEINLINE Quaternion Quaternion::Multiply(Quaternion second) const noexcept
 {
     return Quaternion{ DirectX::XMQuaternionMultiply(data, second.data) };
@@ -61,9 +58,8 @@ VX_MATH_FORCEINLINE Quaternion Quaternion::Inverse() const noexcept
     return Quaternion{ DirectX::XMQuaternionInverse(data) };
 }
 
-// Not XMQuaternionNormalize: that special-cases zero and infinite length the way
-// XMVector4Normalize does, and Vector::Normalize<4> on this backend deliberately does not. Going
-// through Vector keeps a quaternion and a 4-vector behaving the same way on degenerate input.
+// Not XMQuaternionNormalize: it special-cases zero and infinite length, which Vector::Normalize<4>
+// deliberately does not. Going through Vector keeps degenerate input consistent between the two.
 VX_MATH_FORCEINLINE Quaternion Quaternion::Normalize() const noexcept
 {
     return Quaternion{ Vector{ data }.Normalize<4>().Data() };
@@ -99,10 +95,9 @@ VX_MATH_FORCEINLINE Matrix Quaternion::ToMatrix() const noexcept
     return Matrix::RotationQuaternion(*this);
 }
 
-// XMQuaternionToAxisAngle assigns the whole quaternion to the axis output, w included, so the
-// "axis" it hands back has cos(theta/2) sitting in lane 3. Zeroed here: an axis is a direction, and
-// leaving it would also diverge from the WASM backend. The magnitude is still sin(theta/2), matching
-// DirectXMath - normalize it if you need a unit axis.
+// XMQuaternionToAxisAngle puts the whole quaternion in the axis output, leaving cos(theta/2) in
+// lane 3. Zeroed: an axis is a direction, and keeping it would diverge from the WASM backend.
+// Magnitude is still sin(theta/2), so normalize if you need a unit axis.
 VX_MATH_FORCEINLINE void Quaternion::ToAxisAngle(Vector& out_axis, float& out_radians) const noexcept
 {
     DirectX::XMVECTOR axis;
@@ -125,9 +120,8 @@ VX_MATH_FORCEINLINE Quaternion Quaternion::RotationNormal(Vector normal_axis, fl
     return Quaternion{ DirectX::XMQuaternionRotationNormal(normal_axis.Data(), radians) };
 }
 
-// Composed explicitly rather than forwarding to XMQuaternionRotationRollPitchYaw. The WASM backend
-// has to compose it by hand anyway, and if the two disagreed on the order the same Euler triple
-// would mean different rotations per backend - a trap that survives every bit-parity caveat.
+// Composed explicitly, not via XMQuaternionRotationRollPitchYaw: the WASM backend composes by hand
+// anyway, and disagreeing on order would make one Euler triple mean two different rotations.
 VX_MATH_FORCEINLINE Quaternion Quaternion::RotationRollPitchYaw(float pitch,
                                                                 float yaw,
                                                                 float roll) noexcept

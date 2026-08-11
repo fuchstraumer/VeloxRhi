@@ -3,11 +3,14 @@
 #define VELOX_RHI_MATH_HPP
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <cmath>
 #include <cassert>
 #include <limits>
 #include <numbers>
 #include <utility>
+
+#include "math/MathPolynomials.hpp"
 
 // needed early to prefix the swizzle accessors
 #if defined(_MSC_VER)
@@ -42,15 +45,13 @@
     #include <DirectXMath.h>
 #endif
 
-// VX_MATH_RELAXED_SIMD opts the WASM backend into relaxed-simd: fused multiply-add
-// (relaxed_madd / relaxed_nmadd), relaxed_min / relaxed_max, relaxed_trunc, and
-// relaxed_laneselect. Every use has a plain-SIMD #else fallback.
-// Defined by the VELOX_RHI_MATH_RELAXED_SIMD CMake option (ON by default), which also passes
-// -mrelaxed-simd - the builtins do not compile without that flag, so never define this by hand.
-// NOTE this does not degrade gracefully at runtime: a module containing relaxed opcodes fails
-// validation outright on an engine without support rather than falling back. Chrome 114+,
-// Firefox 120+ and Safari 18+ are fine; older mobile browsers will refuse to load the module.
-// todo-ship: consider a runtime capability check with two compiled variants
+// VX_MATH_RELAXED_SIMD opts the WASM backend into relaxed-simd: relaxed_madd / nmadd, relaxed_min /
+// max, relaxed_trunc, relaxed_laneselect. Every use has a plain-SIMD #else fallback. Set by the
+// VELOX_RHI_MATH_RELAXED_SIMD CMake option, which also passes -mrelaxed-simd; the builtins do not
+// compile without it, so never define this by hand.
+// This does NOT degrade at runtime - a module carrying relaxed opcodes fails validation outright on an
+// engine without support. Chrome 114+, Firefox 120+, Safari 18+ are fine; older mobile is not.
+// todo-ship: runtime capability check with two compiled variants
 // Use analytical solutions and approximations in key locations to reduce
 // instruction count (called SHORTCUTS because there's a few diff types of opts, not just approximation)
 #define VX_MATH_USE_SHORTCUTS
@@ -77,6 +78,15 @@ struct Float3x3;
 struct Float4x3;
 struct Float4x4;
 struct Matrix;
+// Defined after Vector, which it holds two of; Vector::SinCos only needs the declaration
+struct SinCosResult;
+
+/** @brief Scalar counterpart of SinCosResult */
+struct ScalarSinCos
+{
+    float sin;
+    float cos;
+};
 
 /**
  * This file defines unoptimized vector/matrix storage types (Float2/3/4,
@@ -304,16 +314,15 @@ public:
 };
 
 /**
- * Lane-wise boolean result of a Vector comparison. Every lane holds either all-zero or all-one bits.
+ * Lane-wise result of a Vector comparison; every lane is all-zero or all-one bits.
  *
- * Deliberately a distinct type rather than a reused Vector, which is what DirectXMath does with
- * XMVECTOR. Arithmetic on a mask is always a bug, and so is passing a mask where a coordinate
- * belongs - both are meaningless but perfectly well-formed if the type is Vector. Hence: no
- * arithmetic operators here at all. Combine masks with the bitwise operators, consume them with
- * Select() or AllTrue/AnyTrue.
+ * A distinct type rather than a reused Vector (which is what DirectXMath does) because arithmetic on a
+ * mask, or passing one where a coordinate belongs, is meaningless but well-formed if the type is
+ * Vector. Hence no arithmetic operators: combine with the bitwise ones, consume via Select() or
+ * AllTrue/AnyTrue.
  *
- * Not to be confused with Vector's AndInt/OrInt/XorInt, which treat a float vector as raw bits for
- * exponent and sign manipulation. That is a different operation from combining predicates.
+ * Distinct from Vector's AndInt/OrInt/XorInt, which manipulate float bit patterns rather than combine
+ * predicates.
  */
 struct alignas(16) VectorMask
 {
@@ -349,7 +358,7 @@ public:
     template<int N>
     bool AnyTrue() const noexcept;
 
-    /** @brief One bit per lane, lane 0 in bit 0. Useful for switching on a comparison result */
+    /** @brief One bit per lane, lane 0 in bit 0 */
     uint32_t LaneBits() const noexcept;
 
     static VectorMask AllSet() noexcept;
@@ -468,7 +477,7 @@ public:
     Vector Pow(float exponent) const noexcept;
     Vector Pow(Vector exponent) const noexcept;
 
-    // Lane-wise comparisons. NaN operands compare false everywhere except CompareNotEqual
+    // NaN operands compare false everywhere except CompareNotEqual
     VectorMask CompareEqual(Vector other) const noexcept;
     VectorMask CompareNotEqual(Vector other) const noexcept;
     VectorMask CompareLess(Vector other) const noexcept;
@@ -479,20 +488,19 @@ public:
     VectorMask IsNaN() const noexcept;
     VectorMask IsInfinite() const noexcept;
 
-    // Bit manipulation, treating the lanes as raw bit patterns rather than numbers. These exist mostly
-    // for exponent and sign work inside Exp2/Log2/Abs - for combining predicates, use VectorMask
+    // Lanes as raw bit patterns, for exponent and sign work. To combine predicates, use VectorMask
     Vector AndInt(Vector other) const noexcept;
     Vector AndNotInt(Vector other) const noexcept;
     Vector OrInt(Vector other) const noexcept;
     Vector XorInt(Vector other) const noexcept;
     Vector NorInt(Vector other) const noexcept;
 
-    // Rounding. Round is to-nearest-even, matching both backends' native instruction
+    // Round is to-nearest-even, matching both backends' native instruction
     Vector Round() const noexcept;
     Vector Truncate() const noexcept;
     Vector Floor() const noexcept;
     Vector Ceil() const noexcept;
-    /** @brief Floating-point remainder of this / divisor, truncated toward zero */
+    /** @brief Remainder of this / divisor, truncated toward zero, so the sign follows the dividend */
     Vector Mod(Vector divisor) const noexcept;
     /** @brief Wraps each lane into [-pi, pi] */
     Vector ModAngles() const noexcept;
@@ -506,12 +514,43 @@ public:
     /** @brief (this.z, other.z, this.w, other.w) */
     Vector MergeZW(Vector other) const noexcept;
 
-    // Lane movement. Index template parameters are 0-3 for X-W
+    // Lane indices 0-3 for X-W
     template<int X, int Y, int Z, int W>
     Vector Swizzle() const noexcept;
-    // Lane movement with another vector: 0-3 for this vector, 4-7 for other vector
+    // As above, but 4-7 index `other`
     template<int X, int Y, int Z, int W>
     Vector Permute(Vector other) const noexcept;
+
+    // Every error figure below is the *measured* worst case from the accuracy sweeps in
+    // tests/unit_tests/MathTests.cpp, taken as the worse of the two backends. Nothing here is
+    // bit-comparable across backends. Re-run those sweeps after touching a coefficient: a wrong
+    // constant still gives a curve of the right shape and magnitude, so nothing else notices.
+    // Pow and the hyperbolics build on Exp2/Log2.
+
+    /**
+     * @brief 2^x. Relative error under 2e-5.
+     * @note That bound is DirectXMath's ~1.0e-5; the WASM series measures ~1.9e-7. The tighter figure
+     * exists only on the web target.
+     */
+    Vector Exp2() const noexcept;
+    /** @brief Relative error under 1e-4. Falls back to Exp2 on DirectXMath */
+    Vector Exp2Est() const noexcept;
+    /** @brief Absolute error under 2e-6. Negative input yields NaN, zero yields -infinity */
+    Vector Log2() const noexcept;
+    /** @brief Absolute error under 1e-5 */
+    Vector Log2Est() const noexcept;
+
+    /** @brief Prefer this over separate Sin/Cos - they share a range reduction */
+    SinCosResult SinCos() const noexcept;
+    SinCosResult SinCosEst() const noexcept;
+    /** @brief Absolute error under 3e-7 within one period, 5e-6 out to +-40 radians */
+    Vector Sin() const noexcept;
+    /** @brief Absolute error under 3e-7 within one period, 5e-6 out to +-40 radians */
+    Vector Cos() const noexcept;
+    /** @brief Absolute error under 2e-5 */
+    Vector SinEst() const noexcept;
+    /** @brief Absolute error under 2e-5 */
+    Vector CosEst() const noexcept;
 
     static Vector Replicate(float scalar) noexcept;
     static Vector Zero() noexcept;
@@ -532,17 +571,25 @@ private:
 };
 
 /**
- * Unit quaternion representing a rotation, laid out (x, y, z, w) with w the scalar part.
+ * Structured binding works: `auto [sine, cosine] = angle.SinCos();`. The pair shares its range
+ * reduction and half the polynomial work, costing ~1.3x one of them rather than 2x.
+ */
+struct SinCosResult
+{
+    Vector sin;
+    Vector cos;
+};
+
+/**
+ * Unit quaternion, laid out (x, y, z, w) with w the scalar part.
  *
- * A distinct type rather than a Vector carrying a convention in its head. The conversion is
- * deliberately one-way - implicit *to* Vector for interop and storage, explicit *from* it - which
- * means a position can never be passed where a rotation is expected. TRS takes four same-typed
- * arguments and a silent swap there produces a plausible-looking wrong matrix, so the type is doing
- * real work. It also puts Identity() somewhere (0,0,0,1) is the right answer; Vector::Identity() is
- * (1,1,1,1) and is not what you want for a rotation.
+ * The conversion is one-way on purpose - implicit *to* Vector, explicit *from* - so a position cannot
+ * be passed where a rotation belongs. TRS takes four same-typed arguments and a silent swap there
+ * yields a plausible-looking wrong matrix. It also puts Identity() where (0,0,0,1) is right;
+ * Vector::Identity() is (1,1,1,1).
  *
- * Every operation assumes unit length. Non-unit quaternions still "work" but encode a rotation
- * composed with a scale, which is almost never intended - Normalize() after any accumulation.
+ * Everything here assumes unit length. Non-unit quaternions encode a rotation composed with a scale,
+ * so Normalize() after accumulating.
  */
 struct alignas(16) Quaternion
 {
@@ -565,7 +612,7 @@ public:
     Quaternion& operator=(const Quaternion& other) noexcept = default;
     Quaternion& operator=(Quaternion&& other) noexcept = default;
 
-    /** @brief Implicit, so a Quaternion can be stored or fed to Vector-taking interop unchanged */
+    /** @brief Implicit, so a Quaternion can be stored or passed to Vector-taking interop */
     operator Vector() const noexcept;
 
     /** @note Accessing a single scalar value in this type is comparatively slow */
@@ -578,18 +625,17 @@ public:
     float w() const noexcept;
 
     /**
-     * @brief Composition. **This rotation is applied first, then `second`.**
+     * @brief Composition. **This rotation applies first, then `second`.**
      *
-     * That is the DirectXMath XMQuaternionMultiply order, and the opposite of how the equivalent
-     * mathematical product q1*q2 is usually read. Deliberately a named method rather than operator*
-     * so the order has somewhere to be documented - getting it backwards yields rotations that look
-     * fine in isolation and only go wrong once they compose.
+     * DirectXMath's XMQuaternionMultiply order, and the opposite of how the product q1*q2 usually
+     * reads. Named rather than operator* so the order has somewhere to live: backwards, it yields
+     * rotations that look fine alone and only go wrong once they compose.
      */
     Quaternion Multiply(Quaternion second) const noexcept;
 
-    /** @brief Negates the vector part. For a unit quaternion this is also the inverse */
+    /** @brief Negates the vector part; for a unit quaternion this is also the inverse */
     Quaternion Conjugate() const noexcept;
-    /** @brief Conjugate divided by squared length, so it is correct for non-unit quaternions too */
+    /** @brief Conjugate over squared length, so correct for non-unit quaternions too */
     Quaternion Inverse() const noexcept;
     Quaternion Normalize() const noexcept;
 
@@ -599,39 +645,28 @@ public:
 
     bool IsIdentity() const noexcept;
 
-    /** @brief Rotates a 3-vector by this rotation. w of the input is ignored, and zero on output.
-     *  @note This choice enables a more instruction-efficient impl, but be aware that it is *not* a 4D 
-     *  rotation. If you need to rotate a 4D vector, use Matrix::RotationQuaternion(*this) and
-     *  multiply the vector by that matrix instead.
-     */
+    /** @brief 3-vector only: input w ignored, output w zero. Cheaper, but *not* a 4D rotation - for
+     *  that, multiply by Matrix::RotationQuaternion(*this) instead. */
     Vector RotateVector(Vector vec) const noexcept;
 
     /** @brief Equivalent to Matrix::RotationQuaternion(*this) */
     Matrix ToMatrix() const noexcept;
 
-    /** @brief Recovers the axis (normalized) and angle in radians this rotation represents.
-     *  @note This involves some scalar math and is not a pure SIMD operation, so it is comparatively slow.
-     *  Use sparingly.
-     */
+    /** @brief Axis has magnitude sin(angle/2) and w == 0; normalize if you need it unit.
+     *  @note Partly scalar, so comparatively slow. Use sparingly. */
     void ToAxisAngle(Vector& out_axis, float& out_radians) const noexcept;
 
     static Quaternion Identity() noexcept;
-    /** @brief Rotation of `radians` about `axis`; the axis is normalized for you */
+    /** @brief Normalizes `axis` for you; RotationNormal skips that */
     static Quaternion RotationAxis(Vector axis, float radians) noexcept;
-    /** @brief As RotationAxis, but assumes `normal_axis` is already unit length */
+    /** @brief Assumes `normal_axis` is already unit length */
     static Quaternion RotationNormal(Vector normal_axis, float radians) noexcept;
-    /**
-     * @brief Euler angles in radians, composed X (pitch), then Y (yaw), then Z (roll).
-     *
-     * @note Composed explicitly on both backends rather than forwarding to DirectXMath,
-     * so the two agree on the order by construction. ToMatrix() on the result equals
-     * RotationX(pitch) * RotationY(yaw) * RotationZ(roll).
-     */
+    /** @brief Euler angles in radians, composed X (pitch), Y (yaw), Z (roll), so ToMatrix() equals
+     *  RotationX(pitch) * RotationY(yaw) * RotationZ(roll). Composed by hand on both backends rather
+     *  than forwarding, so they cannot disagree on the order. */
     static Quaternion RotationRollPitchYaw(float pitch, float yaw, float roll) noexcept;
-    /** @brief Extracts the rotation from a matrix. Assumes the upper-left 3x3 is orthonormal.
-     *  @note Check QuaternionBackend (especially WASM) for more details, but know that this is also
-     *  comparatively slow due to scalarization and branching for correctness/robustness. Use sparingly.
-     */
+    /** @brief Assumes the upper-left 3x3 is orthonormal.
+     *  @note Scalar and branchy for robustness (see QuaternionBackendWASM.inl), so slow. Use sparingly. */
     static Quaternion FromMatrix(const Matrix& mat) noexcept;
 
 private:
@@ -893,9 +928,8 @@ public:
     // Construct from row vectors
     Matrix(Vector row0, Vector row1, Vector row2, Vector row3) noexcept;
 
-    // Defaulted deliberately: the payload is 64 bytes of trivially-copyable SIMD registers, so a
-    // hand-written copy buys nothing and a self-assignment guard is pure cost. Keeping these
-    // defaulted also keeps Matrix trivially copyable
+    // Defaulted: 64 bytes of trivially-copyable SIMD registers, so a hand-written copy buys nothing
+    // and a self-assignment guard is pure cost. Also keeps Matrix trivially copyable
     Matrix(const Matrix& other) noexcept = default;
     Matrix(Matrix&& other) noexcept = default;
     Matrix& operator=(const Matrix& other) noexcept = default;
@@ -940,9 +974,8 @@ public:
 
     // Matrix operations
     Matrix Transpose() const noexcept;
-    // Cofactor expansion, branch-free, with no special case for a singular matrix: a zero
-    // determinant yields a result full of infinities and NaNs rather than an error. Call
-    // Determinant() first if the input might be singular.
+    // Cofactor expansion, branch-free. A singular matrix is not special-cased - it yields infinities
+    // and NaNs, so call Determinant() first if that is possible.
     Matrix Inverse() const noexcept;
     float Determinant() const noexcept;
 
@@ -1015,6 +1048,27 @@ private:
  * and then masking out the result (just like GPUs like to do as well)
  */
 Vector Select(VectorMask mask, Vector when_clear, Vector when_set) noexcept;
+
+// Portable, and reading the same coefficient tables as the Vector forms. These exist because libm is
+// correctly rounded and therefore slow, and because control-rate code wants one value, not four.
+
+/** @brief Both at once, sharing one range reduction */
+ScalarSinCos SinCos(float radians) noexcept;
+ScalarSinCos SinCosEst(float radians) noexcept;
+float Sin(float radians) noexcept;
+float Cos(float radians) noexcept;
+
+float Exp2(float value) noexcept;
+float Log2(float value) noexcept;
+
+/** @brief Wraps into [-pi, pi] */
+constexpr float ModAngles(float radians) noexcept;
+
+constexpr float DegreesToRadians(float degrees) noexcept;
+constexpr float RadiansToDegrees(float radians) noexcept;
+constexpr float Lerp(float from, float to, float t) noexcept;
+constexpr float Clamp(float value, float min, float max) noexcept;
+constexpr float Saturate(float value) noexcept;
 
 // Vector transformation functions that use matrix and vector types together
 template<int N>

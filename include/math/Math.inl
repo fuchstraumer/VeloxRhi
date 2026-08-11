@@ -509,11 +509,198 @@ constexpr Float4x4 Float4x4::Zero() noexcept
     );
 }
 
-// Backend-agnostic: the proxy just carries the Vector until a conversion operator picks the
-// destination width. Those operators are the part that needs SIMD, and live in the backend .inl
+// The proxy carries the Vector until a conversion operator picks the destination width; those
+// operators need SIMD and live in the backend .inl files
 VX_MATH_FORCEINLINE detail::FromVectorProxy FromVector(Vector vec) noexcept
 {
     return detail::FromVectorProxy{ vec };
+}
+
+// Scalar on purpose: one value in, one out, and a splat-then-extract round trip would cost more than
+// the arithmetic. Coefficients come from math/MathPolynomials.hpp, shared with the SIMD paths.
+
+constexpr VX_MATH_FORCEINLINE float DegreesToRadians(float degrees) noexcept
+{
+    return degrees * (std::numbers::pi_v<float> / 180.0f);
+}
+
+constexpr VX_MATH_FORCEINLINE float RadiansToDegrees(float radians) noexcept
+{
+    return radians * (180.0f / std::numbers::pi_v<float>);
+}
+
+constexpr VX_MATH_FORCEINLINE float Lerp(float from, float to, float t) noexcept
+{
+    return from + (to - from) * t;
+}
+
+constexpr VX_MATH_FORCEINLINE float Clamp(float value, float min, float max) noexcept
+{
+    return value < min ? min : (value > max ? max : value);
+}
+
+constexpr VX_MATH_FORCEINLINE float Saturate(float value) noexcept
+{
+    return Clamp(value, 0.0f, 1.0f);
+}
+
+// x - 2pi * round(x / 2pi). Round-to-nearest, not truncation: truncating leaves the negative half
+// unreduced
+constexpr VX_MATH_FORCEINLINE float ModAngles(float radians) noexcept
+{
+    constexpr float k_TwoPi = 2.0f * std::numbers::pi_v<float>;
+    constexpr float k_ReciprocalTwoPi = 1.0f / k_TwoPi;
+
+    const float revolutions = radians * k_ReciprocalTwoPi;
+    // hand-rolled because std::round is not reliably constexpr; equivalent for any angle magnitude
+    const float rounded = static_cast<float>(static_cast<int32_t>(revolutions + (revolutions < 0.0f ? -0.5f : 0.5f)));
+    return radians - k_TwoPi * rounded;
+}
+
+namespace detail
+{
+    // Scalar twin of ReduceForTrig in the backend files, which has to use Select where this branches
+    struct ScalarTrigReduction
+    {
+        float angle;
+        float cosSign;
+    };
+
+    constexpr VX_MATH_FORCEINLINE ScalarTrigReduction ReduceForTrigScalar(float radians) noexcept
+    {
+        constexpr float k_Pi = std::numbers::pi_v<float>;
+        constexpr float k_HalfPi = k_Pi * 0.5f;
+
+        const float wrapped = ModAngles(radians);
+        const float magnitude = wrapped < 0.0f ? -wrapped : wrapped;
+        if (magnitude <= k_HalfPi)
+        {
+            return ScalarTrigReduction{ wrapped, 1.0f };
+        }
+
+        // sin(pi - x) == sin(x), cos(pi - x) == -cos(x)
+        const float signedPi = wrapped < 0.0f ? -k_Pi : k_Pi;
+        return ScalarTrigReduction{ signedPi - wrapped, -1.0f };
+    }
+
+    constexpr VX_MATH_FORCEINLINE float SinPolynomialScalar(float angle) noexcept
+    {
+        const float squared = angle * angle;
+        float polynomial = k_SinPoly11;
+        polynomial = polynomial * squared + k_SinPoly9;
+        polynomial = polynomial * squared + k_SinPoly7;
+        polynomial = polynomial * squared + k_SinPoly5;
+        polynomial = polynomial * squared + k_SinPoly3;
+        polynomial = polynomial * squared + 1.0f;
+        return polynomial * angle;
+    }
+
+    constexpr VX_MATH_FORCEINLINE float CosPolynomialScalar(float angle) noexcept
+    {
+        const float squared = angle * angle;
+        float polynomial = k_CosPoly10;
+        polynomial = polynomial * squared + k_CosPoly8;
+        polynomial = polynomial * squared + k_CosPoly6;
+        polynomial = polynomial * squared + k_CosPoly4;
+        polynomial = polynomial * squared + k_CosPoly2;
+        return polynomial * squared + 1.0f;
+    }
+
+    constexpr VX_MATH_FORCEINLINE float SinPolynomialScalarEst(float angle) noexcept
+    {
+        const float squared = angle * angle;
+        float polynomial = k_SinEstPoly7;
+        polynomial = polynomial * squared + k_SinEstPoly5;
+        polynomial = polynomial * squared + k_SinEstPoly3;
+        polynomial = polynomial * squared + 1.0f;
+        return polynomial * angle;
+    }
+
+    constexpr VX_MATH_FORCEINLINE float CosPolynomialScalarEst(float angle) noexcept
+    {
+        const float squared = angle * angle;
+        float polynomial = k_CosEstPoly6;
+        polynomial = polynomial * squared + k_CosEstPoly4;
+        polynomial = polynomial * squared + k_CosEstPoly2;
+        return polynomial * squared + 1.0f;
+    }
+} // namespace detail
+
+VX_MATH_FORCEINLINE ScalarSinCos SinCos(float radians) noexcept
+{
+    const detail::ScalarTrigReduction reduction = detail::ReduceForTrigScalar(radians);
+    return ScalarSinCos{ detail::SinPolynomialScalar(reduction.angle),
+                         detail::CosPolynomialScalar(reduction.angle) * reduction.cosSign };
+}
+
+VX_MATH_FORCEINLINE ScalarSinCos SinCosEst(float radians) noexcept
+{
+    const detail::ScalarTrigReduction reduction = detail::ReduceForTrigScalar(radians);
+    return ScalarSinCos{ detail::SinPolynomialScalarEst(reduction.angle),
+                         detail::CosPolynomialScalarEst(reduction.angle) * reduction.cosSign };
+}
+
+VX_MATH_FORCEINLINE float Sin(float radians) noexcept
+{
+    return detail::SinPolynomialScalar(detail::ReduceForTrigScalar(radians).angle);
+}
+
+VX_MATH_FORCEINLINE float Cos(float radians) noexcept
+{
+    const detail::ScalarTrigReduction reduction = detail::ReduceForTrigScalar(radians);
+    return detail::CosPolynomialScalar(reduction.angle) * reduction.cosSign;
+}
+
+// 2^n written straight into the exponent field, times the series for 2^f, f in [-0.5, 0.5]
+VX_MATH_FORCEINLINE float Exp2(float value) noexcept
+{
+    const float nearest = static_cast<float>(static_cast<int32_t>(value + (value < 0.0f ? -0.5f : 0.5f)));
+    const float fraction = value - nearest;
+
+    float polynomial = detail::k_Exp2Poly6;
+    polynomial = polynomial * fraction + detail::k_Exp2Poly5;
+    polynomial = polynomial * fraction + detail::k_Exp2Poly4;
+    polynomial = polynomial * fraction + detail::k_Exp2Poly3;
+    polynomial = polynomial * fraction + detail::k_Exp2Poly2;
+    polynomial = polynomial * fraction + detail::k_Exp2Poly1;
+    polynomial = polynomial * fraction + 1.0f;
+
+    const int32_t biasedExponent = static_cast<int32_t>(nearest) + 127;
+    const uint32_t scaleBits = static_cast<uint32_t>(biasedExponent) << 23;
+    float scale = 0.0f;
+    std::memcpy(&scale, &scaleBits, sizeof(scale));
+
+    return polynomial * scale;
+}
+
+// Exponent from the bit pattern, mantissa folded into [1/sqrt2, sqrt2), then the atanh series
+VX_MATH_FORCEINLINE float Log2(float value) noexcept
+{
+    uint32_t bits = 0u;
+    std::memcpy(&bits, &value, sizeof(bits));
+
+    float exponent = static_cast<float>(static_cast<int32_t>((bits >> 23) & 0xFFu) - 127);
+
+    const uint32_t mantissaBits = (bits & 0x007FFFFFu) | 0x3F800000u;
+    float mantissa = 0.0f;
+    std::memcpy(&mantissa, &mantissaBits, sizeof(mantissa));
+
+    constexpr float k_Sqrt2 = 1.41421356f;
+    if (mantissa > k_Sqrt2)
+    {
+        mantissa *= 0.5f;
+        exponent += 1.0f;
+    }
+
+    const float ratio = (mantissa - 1.0f) / (mantissa + 1.0f);
+    const float ratioSquared = ratio * ratio;
+
+    float series = detail::k_Log2Poly7;
+    series = series * ratioSquared + detail::k_Log2Poly5;
+    series = series * ratioSquared + detail::k_Log2Poly3;
+    series = series * ratioSquared + detail::k_Log2Poly1;
+
+    return exponent + series * ratio * detail::k_Log2Scale;
 }
 
 // ================================

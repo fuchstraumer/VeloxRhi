@@ -5,19 +5,16 @@
 #include <cstddef>
 #include <functional>
 
-// std::hash specializations for the storage vector types, so they can be used as keys in
-// unordered containers (vertex welding during mesh generation being the motivating case).
-// The SIMD Vector/Matrix types are deliberately not hashable: they are not meant to be stored,
-// and their unused lanes may hold garbage that would produce unequal hashes for equal values.
+// std::hash for the storage types, so they work as unordered container keys - vertex welding being
+// the motivating case. Vector/Matrix are deliberately not hashable: unused lanes may hold garbage that
+// would hash unequal for equal values.
 //
-// NOTE: these hash the float bit patterns as-is. +0.0f and -0.0f compare equal under
-// Float2::operator== but hash differently, and any NaN hashes to something that never matches
-// itself. Callers welding geometry should quantize before hashing rather than relying on
-// exact float equality.
+// These hash float bit patterns as-is, so +0.0f and -0.0f hash differently despite comparing equal,
+// and a NaN never matches itself. Quantize before hashing when welding geometry.
 
 namespace velox::math::detail
 {
-    // boost::hash_combine, with the golden-ratio constant for distribution
+    // boost::hash_combine
     constexpr std::size_t HashCombine(std::size_t seed, std::size_t hash) noexcept
     {
         return seed ^ (hash + 0x9e3779b9u + (seed << 6) + (seed >> 2));

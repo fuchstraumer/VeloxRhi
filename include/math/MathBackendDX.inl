@@ -29,7 +29,7 @@ VX_MATH_FORCEINLINE VectorMask VectorMask::operator^(VectorMask rhs) const noexc
     return VectorMask{ DirectX::XMVectorXorInt(data, rhs.data) };
 }
 
-// DirectXMath has no XMVectorNotInt; NOR against itself gives ~(v | v) == ~v
+// no XMVectorNotInt exists; NOR against itself is ~(v | v) == ~v
 VX_MATH_FORCEINLINE VectorMask VectorMask::operator~() const noexcept
 {
     return VectorMask{ DirectX::XMVectorNorInt(data, data) };
@@ -177,9 +177,7 @@ VX_MATH_FORCEINLINE Vector Vector::operator-() const noexcept
     return Vector{ DirectX::XMVectorNegate(data) };
 }
 
-// VX_MATH_RELAXED_SIMD has no effect on this backend: XMVectorMultiplyAdd
-// already lowers to a hardware FMA instruction when the target/compiler
-// flags support it, with no separate "relaxed" mode to opt into.
+// VX_MATH_RELAXED_SIMD does nothing here: XMVectorMultiplyAdd already lowers to a hardware FMA
 VX_MATH_FORCEINLINE Vector Vector::MultiplyAdd(Vector factor, Vector addend) const noexcept
 {
     return Vector{ DirectX::XMVectorMultiplyAdd(data, factor.data, addend.data) };
@@ -211,8 +209,8 @@ VX_MATH_FORCEINLINE Vector& Vector::operator*=(float scalar) noexcept
     data = DirectX::XMVectorScale(data, scalar);
     return *this;
 }
-// A true divide, not a reciprocal multiply: the WASM backend has no scale-by-reciprocal
-// shortcut, and matching it here keeps the two backends agreeing to the last bit.
+// True divide, not a reciprocal multiply: wasm has no scale-by-reciprocal, and matching keeps the
+// two backends agreeing to the last bit.
 VX_MATH_FORCEINLINE Vector& Vector::operator/=(float scalar) noexcept
 {
     data = DirectX::XMVectorDivide(data, DirectX::XMVectorReplicate(scalar));
@@ -232,10 +230,9 @@ VX_MATH_FORCEINLINE Vector Vector::ReciprocalSqrt() const noexcept
     return Vector{ DirectX::XMVectorReciprocalSqrt(data) };
 }
 
-// Deliberately a raw divide by the replicated length rather than XMVector{2,3,4}Normalize.
-// Those special-case zero length to zero and infinite length to QNaN; the WASM backend has no
-// such handling, and a silent per-backend difference on degenerate input is worse than a
-// consistent infinity. Callers that care must check the length themselves.
+// Raw divide, not XMVector{2,3,4}Normalize: those map zero length to zero and infinite to QNaN,
+// which wasm does not. A consistent infinity beats a silent per-backend difference. Check the length
+// yourself if it matters.
 template<int N>
 VX_MATH_FORCEINLINE Vector Vector::Normalize() const noexcept
 {
@@ -285,8 +282,7 @@ VX_MATH_FORCEINLINE Vector Vector::Cross(Vector other) const noexcept
     return Vector{ DirectX::XMVector3Cross(data, other.data) };
 }
 
-// XMVector{2,3,4}Dot already replicate the result across every lane, matching the WASM
-// backend's butterfly reduction, so DotVec is the primitive and Dot extracts from it.
+// XMVector{2,3,4}Dot already replicate across every lane, so DotVec is the primitive
 template<int N>
 VX_MATH_FORCEINLINE Vector Vector::DotVec(Vector other) const noexcept
 {
@@ -392,9 +388,6 @@ VX_MATH_FORCEINLINE Vector Vector::Epsilon() noexcept
     return Vector{ DirectX::XMVectorSplatEpsilon() };
 }
 
-// ================================
-// Comparisons
-// ================================
 
 VX_MATH_FORCEINLINE VectorMask Vector::CompareEqual(Vector other) const noexcept
 {
@@ -441,16 +434,13 @@ VX_MATH_FORCEINLINE VectorMask Vector::IsInfinite() const noexcept
     return VectorMask{ DirectX::XMVectorIsInfinite(data) };
 }
 
-// ================================
-// Bit manipulation (lanes as bit patterns, not numbers)
-// ================================
 
 VX_MATH_FORCEINLINE Vector Vector::AndInt(Vector other) const noexcept
 {
     return Vector{ DirectX::XMVectorAndInt(data, other.data) };
 }
 
-// Clears the bits that `other` has set, i.e. `~other & this` - DirectXMath spells this AndCInt
+// ~other & this; DirectXMath spells it AndCInt
 VX_MATH_FORCEINLINE Vector Vector::AndNotInt(Vector other) const noexcept
 {
     return Vector{ DirectX::XMVectorAndCInt(data, other.data) };
@@ -471,9 +461,6 @@ VX_MATH_FORCEINLINE Vector Vector::NorInt(Vector other) const noexcept
     return Vector{ DirectX::XMVectorNorInt(data, other.data) };
 }
 
-// ================================
-// Rounding
-// ================================
 
 VX_MATH_FORCEINLINE Vector Vector::Round() const noexcept
 {
@@ -505,9 +492,6 @@ VX_MATH_FORCEINLINE Vector Vector::ModAngles() const noexcept
     return Vector{ DirectX::XMVectorModAngles(data) };
 }
 
-// ================================
-// Lane movement
-// ================================
 
 VX_MATH_FORCEINLINE Vector Vector::SplatX() const noexcept
 {
@@ -559,7 +543,7 @@ VX_MATH_FORCEINLINE Vector Vector::Permute(Vector other) const noexcept
 // Free Function Implementations (Vector)
 // ================================
 
-// XMVectorSelect takes the first argument where the control bit is clear, the second where it is set
+// XMVectorSelect takes its first argument where the control bit is clear - note the operand swap
 VX_MATH_FORCEINLINE Vector Select(VectorMask mask, Vector when_clear, Vector when_set) noexcept
 {
     return Vector{ DirectX::XMVectorSelect(when_clear.Data(), when_set.Data(), mask.Data()) };
@@ -760,8 +744,7 @@ VX_MATH_FORCEINLINE Matrix Matrix::Transpose() const noexcept
     return Matrix{ DirectX::XMMatrixTranspose(data) };
 }
 
-// The WASM backend ports this same cofactor expansion by hand; neither special-cases a singular
-// matrix. The determinant out-parameter is unused here - callers wanting it use Determinant().
+// Same cofactor expansion the WASM backend ports by hand; neither special-cases a singular matrix
 VX_MATH_FORCEINLINE Matrix Matrix::Inverse() const noexcept
 {
     return Matrix{ DirectX::XMMatrixInverse(nullptr, data) };
@@ -821,10 +804,9 @@ VX_MATH_FORCEINLINE Matrix Matrix::RotationRollPitchYaw(float pitch, float yaw, 
     return Matrix::RotationQuaternion(Quaternion::RotationRollPitchYaw(pitch, yaw, roll));
 }
 
-// Written out rather than forwarded to XMMatrixAffineTransformation so that both backends
-// perform the same operations in the same order and agree bit-for-bit. Because S is diagonal
-// and rows 0-2 of a rotation matrix have w == 0, S * R * T reduces to scaling each rotation
-// row and writing the translation into row 3.
+// Written out rather than forwarded to XMMatrixAffineTransformation, so both backends do the same
+// operations in the same order. S is diagonal and rows 0-2 of a rotation have w == 0, so S * R * T
+// reduces to scaling each rotation row and writing the translation into row 3.
 VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Quaternion rotation_quaternion, Vector scale) noexcept
 {
     const DirectX::XMMATRIX rotation = DirectX::XMMatrixRotationQuaternion(rotation_quaternion.Data());
@@ -837,8 +819,8 @@ VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation, Quaternion rotation_q
         DirectX::XMVectorSetW(translation.Data(), 1.0f) } };
 }
 
-// Rotating about rotation_origin leaves the linear part identical and only shifts the
-// translation row to t + Ro - Ro * R, with Ro passing through the *unscaled* rotation.
+// A rotation origin leaves the linear part identical, shifting only the translation row to
+// t + Ro - Ro * R, with Ro through the *unscaled* rotation.
 VX_MATH_FORCEINLINE Matrix Matrix::TRS(Vector translation,
                                        Quaternion rotation_quaternion,
                                        Vector scale,
@@ -1054,3 +1036,4 @@ VX_MATH_FORCEINLINE Float4x4 FromMatrix(const Matrix& mat) noexcept
 
 // Quaternion implementations live in their own file to keep this one navigable
 #include "math/QuaternionBackendDX.inl"
+#include "math/TranscendentalBackendDX.inl"

@@ -1,10 +1,6 @@
 #pragma once
-// WASM SIMD128 implementations for math::Quaternion. Included from the end of MathBackendWASM.inl,
-// which is itself reached through Math.hpp -> Math.inl. Include nothing here: re-entering that cycle
-// would parse every definition below twice.
-//
-// Kept in its own file purely to stop MathBackendWASM.inl growing without bound; there is no
-// dispatch decision in here beyond the one Math.inl already made.
+// WASM SIMD128 implementations for math::Quaternion. Included from MathBackendWASM.inl; include
+// nothing here, re-entering that cycle would parse every definition below twice.
 namespace velox::math
 {
 
@@ -45,13 +41,11 @@ VX_MATH_FORCEINLINE float Quaternion::w() const noexcept
     return wasm_f32x4_extract_lane(data, 3);
 }
 
-// Hamilton product, arranged so each output lane is one FMA chain against a broadcast component of
-// `second` - the same broadcast-and-accumulate shape as MulRowByMatrix, and for the same reason:
-// no horizontal reductions. Sign patterns come from expanding
-// (x1 i + y1 j + z1 k + w1)(x2 i + y2 j + z2 k + w2) with ij = k, jk = i, ki = j, ii = jj = kk = -1.
+// Hamilton product as four FMA chains against broadcast components of `second` - no horizontal
+// reductions, same shape as MulRowByMatrix. Sign patterns come from expanding the product with
+// ij = k, jk = i, ki = j, ii = jj = kk = -1.
 //
-// The argument order is DirectXMath's: `*this` is applied first, then `second`. That corresponds to
-// the mathematical product second * this.
+// `*this` applies first, then `second` (DirectXMath's order, i.e. the product second * this).
 VX_MATH_FORCEINLINE Quaternion Quaternion::Multiply(Quaternion second) const noexcept
 {
     const v128_t lhs = data;
@@ -62,7 +56,7 @@ VX_MATH_FORCEINLINE Quaternion Quaternion::Multiply(Quaternion second) const noe
     const v128_t rhsZ = wasm_i32x4_shuffle(rhs, rhs, 2, 2, 2, 2);
     const v128_t rhsW = wasm_i32x4_shuffle(rhs, rhs, 3, 3, 3, 3);
 
-    // (w1, z1, y1, x1) etc - the cross-term reorderings, each with its own sign pattern
+    // cross-term reorderings, each with its own sign pattern
     const v128_t lhsWZYX = wasm_i32x4_shuffle(lhs, lhs, 3, 2, 1, 0);
     const v128_t lhsZWXY = wasm_i32x4_shuffle(lhs, lhs, 2, 3, 0, 1);
     const v128_t lhsYXWZ = wasm_i32x4_shuffle(lhs, lhs, 1, 0, 3, 2);
@@ -147,8 +141,7 @@ VX_MATH_FORCEINLINE Matrix Quaternion::ToMatrix() const noexcept
 VX_MATH_FORCEINLINE void Quaternion::ToAxisAngle(Vector& out_axis, float& out_radians) const noexcept
 {
     out_axis = Vector{ wasm_f32x4_replace_lane(data, 3, 0.0f) };
-    // clamped because a quaternion that has drifted slightly past unit length would otherwise hand
-    // std::acos an argument outside [-1, 1] and get a NaN back
+    // clamped: a quaternion drifted past unit length would hand std::acos an out-of-range argument
     const float scalarPart = std::fmin(std::fmax(w(), -1.0f), 1.0f);
     out_radians = 2.0f * std::acos(scalarPart);
 }
@@ -169,7 +162,7 @@ VX_MATH_FORCEINLINE Quaternion Quaternion::RotationNormal(Vector normal_axis, fl
     const float sinHalf = std::sin(halfAngle);
     const float cosHalf = std::cos(halfAngle);
 
-    // (axis * sin(theta/2), cos(theta/2)) - the scale lands in xyz, the scalar replaces w
+    // (axis * sin(theta/2), cos(theta/2))
     const v128_t scaled = wasm_f32x4_mul(normal_axis.Data(), wasm_f32x4_splat(sinHalf));
     return Quaternion{ wasm_f32x4_replace_lane(scaled, 3, cosHalf) };
 }
@@ -184,10 +177,9 @@ VX_MATH_FORCEINLINE Quaternion Quaternion::RotationRollPitchYaw(float pitch,
     return aboutX.Multiply(aboutY).Multiply(aboutZ);
 }
 
-// Shepperd's method: four algebraically equivalent ways to recover the quaternion, each dividing by
-// a different component. Picking the largest via the trace comparisons avoids dividing by something
-// near zero, which is where the naive single-formula version loses all its precision. Scalar and branchy
-// on purpose - this is not a hot-path op. Clarity and correctness are more important than SIMD speed here.
+// Shepperd's method: four equivalent recoveries, each dividing by a different component. The trace
+// comparisons pick the largest, avoiding the near-zero divide that wrecks the single-formula version.
+// Scalar and branchy on purpose - not a hot path, so clarity wins over SIMD.
 VX_MATH_FORCEINLINE Quaternion Quaternion::FromMatrix(const Matrix& mat) noexcept
 {
     const float m00 = mat[0, 0];

@@ -112,15 +112,22 @@ set(VeloxRhi_Headers
     "${CMAKE_CURRENT_SOURCE_DIR}/include/VeloxErrors.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/math/Math.inl"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathHashes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathPolynomials.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/MeshGenerator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/SlotMap.hpp")
 
 # append corrent Math.inl backend based on platform
 if (EMSCRIPTEN)
-    list(APPEND VeloxRhi_Headers "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathBackendWASM.inl")
+    list(APPEND VeloxRhi_Headers
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathBackendWASM.inl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/math/QuaternionBackendWASM.inl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/math/TranscendentalBackendWASM.inl")
 elseif (WIN32)
     # todo/note: if we move off dx12 as a backend, we may just want to use GLM or the like
-    list(APPEND VeloxRhi_Headers "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathBackendDX.inl")
+    list(APPEND VeloxRhi_Headers
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/math/MathBackendDX.inl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/math/QuaternionBackendDX.inl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/math/TranscendentalBackendDX.inl")
 endif()
 
 set(VeloxRhi_SOURCES
@@ -157,15 +164,14 @@ if (NOT EMSCRIPTEN)
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dawn/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/slang/include)
 endif()
-# NOTE: relaxed-simd does not degrade gracefully. The opcodes are required at compile time, and a
-# module containing them fails validation outright on an engine without support - it does not fall
-# back to mul+add at runtime. Chrome 114+ / Firefox 120+ / Safari 18+ are fine; older Safari and
-# older mobile browsers will refuse to instantiate the module. Turn this OFF to widen support.
+# relaxed-simd does not degrade gracefully: a module carrying these opcodes fails validation outright
+# on an engine without support rather than falling back at runtime. Chrome 114+ / Firefox 120+ /
+# Safari 18+ are fine; older mobile is not. OFF widens support.
 option(VELOX_RHI_MATH_RELAXED_SIMD "Use wasm relaxed-simd FMA in velox::math" ON)
 
 if (EMSCRIPTEN)
-    # PUBLIC, not PRIVATE: the math backend is header-only inline code instantiated both in this
-    # library's own TUs and in every consumer's, so both sides must agree on the SIMD feature set
+    # PUBLIC: the math backend is header-only, instantiated in this library's TUs and every consumer's,
+    # so both sides must agree on the SIMD feature set
     target_compile_options(VeloxRhi PUBLIC -msimd128)
     if (VELOX_RHI_MATH_RELAXED_SIMD)
         target_compile_options(VeloxRhi PUBLIC -mrelaxed-simd)
