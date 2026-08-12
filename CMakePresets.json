@@ -67,6 +67,12 @@
             "configuration" : "RelWithDebInfo"
         },
         {
+            "name" : "windows-ninja-msvc-release",
+            "description" : "Builds the project using the Windows x64 MSVC (Ninja) configure preset",
+            "configurePreset" : "ninja-msvc",
+            "configuration" : "Release"
+        },
+        {
             "name" : "emscripten-build-debug",
             "description" : "Builds the project using the Emscripten configure preset",
             "configurePreset" : "emscripten",

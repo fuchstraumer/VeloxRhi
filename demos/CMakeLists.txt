@@ -18,7 +18,6 @@ function(add_velox_rhi_demo NAME)
     endif()
 
     if (EMSCRIPTEN)
-
         target_link_libraries(${NAME} PRIVATE
             VeloxRhi emdawnwebgpu_cpp webgpu_glfw
             magic_enum::magic_enum)
@@ -33,26 +32,7 @@ function(add_velox_rhi_demo NAME)
             "-sMALLOC=emmalloc"
             "-sUSE_GLFW=3")
 
-        if (CMAKE_BUILD_TYPE MATCHES "Debug")
-            target_compile_options(${NAME} PRIVATE -g -O0)
-            target_link_options(${NAME} PRIVATE -g -O0)
-            target_link_options(${NAME} PRIVATE "-gseparate-dwarf")
-        elseif (CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
-            target_compile_options(${NAME} PRIVATE -g -O2)
-            target_link_options(${NAME} PRIVATE -g -O2 "-gseparate-dwarf")
-        elseif (CMAKE_BUILD_TYPE MATCHES "MinSizeRel")
-            target_compile_options(${NAME} PRIVATE -Oz -fno-exceptions -fno-rtti -flto)
-            target_link_options(${NAME} PRIVATE -Oz -closure=2 -flto)
-        else()
-            target_compile_options(${NAME} PRIVATE -Oz -fno-exceptions -fno-rtti -flto)
-            target_link_options(${NAME} PRIVATE -Oz -closure=2 -flto)
-        endif()
-
         set_target_properties(${NAME} PROPERTIES SUFFIX ".html")
-    endif()
-
-    if (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
-        target_compile_definitions(${NAME} PUBLIC VELOX_ENABLE_DIAGNOSTICS)
     endif()
 
     if (NOT EMSCRIPTEN)
