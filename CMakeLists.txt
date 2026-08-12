@@ -24,8 +24,9 @@ if (MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # /MP: Tells cl.exe to multithread
     # /bigobj: Increases number of sections in .obj (slang can bump into this ime)
     # /arch:AVX2: Enables AVX2 instructions
-    add_compile_options(/MP /bigobj /arch:AVX2 /Gy)
-    add_compile_definitions(_HAS_EXCEPTIONS=0)
+    add_compile_options(/MP /bigobj /arch:AVX2 /Gy /EHsc /Zi /GL)
+    add_link_options(/DEBUG /INCREMENTAL:NO /LTCG)
+    add_compile_definitions(VELOX_ENABLE_DIAGNOSTICS)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # Clang specific flags
     if (NOT EMSCRIPTEN)
@@ -100,6 +101,16 @@ add_custom_command(
     VERBATIM)
 set_source_files_properties(${OCEAN_FFT_GENERATED_OUTPUTS} PROPERTIES GENERATED TRUE)
 
+set(VeloxRhi_AsyncSources
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/async/AsyncCore.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/async/AsyncTasks.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/async/CoroutineAllocator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/async/Future.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/async/Scheduler.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/async/AsyncTasks.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/async/Future.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/async/Scheduler.cpp")
+
 set(VeloxRhi_CommonSources
     "${CMAKE_CURRENT_SOURCE_DIR}/include/common/VeloxErrors.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/common/VeloxLogging.hpp"
@@ -107,19 +118,11 @@ set(VeloxRhi_CommonSources
 
 set(VeloxRhi_CoreSources
     "${CMAKE_CURRENT_SOURCE_DIR}/include/core/Application.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/AsyncTasks.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/Context.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/CoroutineAllocator.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/Future.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/core/InputEvent.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/core/InputManager.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/core/Scheduler.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Application.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/AsyncTasks.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Context.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Future.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/InputManager.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Scheduler.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/InputManager.cpp")
 
 set(VeloxRhi_UtilitySources
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/MeshGenerator.hpp"
@@ -160,6 +163,7 @@ endif()
 
 # todo-ship: Need to fix dxil.dll and related friends not copying to .exe output dir on Windows
 add_library(VeloxRhi STATIC
+    ${VeloxRhi_AsyncSources}
     ${VeloxRhi_CommonSources}
     ${VeloxRhi_CoreSources}
     ${VeloxRhi_UtilitySources}
@@ -182,6 +186,7 @@ set(VeloxRHI_mikktspace_SOURCES
 
 target_sources(VeloxRhi PRIVATE ${VeloxRHI_mikktspace_SOURCES})
 
+source_group("rhi\\async" FILES ${VeloxRhi_AsyncSources})
 source_group("rhi\\common" FILES ${VeloxRhi_CommonSources})
 source_group("rhi\\core" FILES ${VeloxRhi_CoreSources})
 source_group("rhi\\utility" FILES ${VeloxRhi_UtilitySources})
@@ -213,7 +218,7 @@ endif()
 
 # set required definition for imgui backend (dawn)
 target_compile_definitions(VeloxRhi PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
-if (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
+if (CMAKE_CONFIG_TYPE MATCHES "Debug|RelWithDebInfo")
     target_compile_definitions(VeloxRhi PUBLIC VELOX_ENABLE_DIAGNOSTICS)
 endif()
 
