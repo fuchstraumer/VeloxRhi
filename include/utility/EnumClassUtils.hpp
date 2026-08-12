@@ -49,11 +49,27 @@ constexpr auto operator~(const T value) noexcept
     return static_cast<T>(~std::to_underlying(value));
 }
 
+// pairs with ~ for the clear-a-flag idiom: usage &= ~Flags::MapWrite
+template<typename T>
+    requires(std::is_enum_v<T> and requires(T e) { enable_bitmask_operator_and(e); })
+constexpr T& operator&=(T& lhs, const T rhs) noexcept
+{
+    lhs = static_cast<T>(std::to_underlying(lhs) & std::to_underlying(rhs));
+    return lhs;
+}
+
+template<typename T>
+    requires(std::is_enum_v<T> and requires(T e) { enable_bitmask_operator_xor(e); })
+constexpr T& operator^=(T& lhs, const T rhs) noexcept
+{
+    lhs = static_cast<T>(std::to_underlying(lhs) ^ std::to_underlying(rhs));
+    return lhs;
+}
+
 /** @brief True when every bit in flags is set in value. The right test for a single-bit flag, and the
  * one that reads correctly when passed a multi-bit alias like AllTransfer.
- * @note Prefer this over `value & flag` in a condition: the bitwise operators below return the enum
- * type, which has no implicit conversion to bool. Only BitmaskTrueType converts, and only when it is
- * the right-hand operand.
+ * @note Use this rather than `value & flag` in a condition - the operators above return the enum type,
+ * which has no implicit conversion to bool.
  */
 template<typename T>
     requires std::is_enum_v<T>
