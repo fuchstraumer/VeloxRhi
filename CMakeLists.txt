@@ -19,26 +19,43 @@ if (NOT EMSCRIPTEN)
     set(VulkanHeaders_INCLUDE_DIR ${Vulkan_INCLUDE_DIR} CACHE PATH "" FORCE)
 endif()
 
+# flags required to make things work at baseline on desktop toolchains (ime)
 if (MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # MSVC specific flags
     # /MP: Tells cl.exe to multithread
     # /bigobj: Increases number of sections in .obj (slang can bump into this ime)
     # /arch:AVX2: Enables AVX2 instructions
-    add_compile_options(/MP /bigobj /arch:AVX2 /Gy /EHsc /Zi /GL)
-    add_link_options(/DEBUG /INCREMENTAL:NO /LTCG)
-    add_compile_definitions(VELOX_ENABLE_DIAGNOSTICS)
+    add_compile_options(/MP /bigobj /arch:AVX2)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # Clang specific flags
     if (NOT EMSCRIPTEN)
         add_compile_options(-mavx2)
     endif()
-    if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-        # emulate bigobj flag as, again, slang can break on this
-        add_compile_options(/bigobj)
-    elseif(MINGW)
-        add_compile_options(-mbig-obj)
-    endif()
 endif()
+
+# debug-specific flags and options
+if (MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_definitions($<$<CONFIG:Debug>:VELOX_ENABLE_DIAGNOSTICS>)
+    add_compile_options(
+        $<$<CONFIG:Debug>:/Od /Zi>
+        $<$<CONFIG:RelWithDebInfo>:/Ob2 /Oi /Ot /Gy /Zo>
+        $<$<CONFIG:Release>:/O2 /Ob3 /Oi /Ot /Gy /Oy /fp:fast /GL /Qpar>)
+    add_link_options($<$<CONFIG:Debug>:/DEBUG>)
+    add_link_options($<$<CONFIG:RelWithDebInfo>:/DEBUG>)
+    add_link_options($<$<CONFIG:Release>:/LTCG /OPT:REF /OPT:ICF>)
+elseif(EMSCRIPTEN)
+    add_compile_options(
+        $<$<CONFIG:Debug>:-O0 -g>
+        $<$<CONFIG:RelWithDebInfo>:-Og -g -flto>
+        $<$<CONFIG:Release>:-O3 -closure=2 -flto -fno-exceptions -fno-rtti -fno-threadsafe-statics>
+        $<$<CONFIG:MinSizeRel>:-Oz -closure=2 -flto -fno-exceptions -fno-rtti -fno-threadsafe-statics>)
+    add_link_options(
+        $<$<CONFIG:Debug>:-O0 -g>
+        $<$<CONFIG:RelWithDebInfo>:-Og -g -flto>
+        $<$<CONFIG:Release>:-O3 -closure=2>
+        $<$<CONFIG:MinSizeRel>:-Oz -closure=2 -flto>)
+endif()
+
 
 if (NOT EMSCRIPTEN)
 
