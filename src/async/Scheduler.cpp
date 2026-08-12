@@ -1,4 +1,4 @@
-#include "core/Scheduler.hpp"
+#include "async/Scheduler.hpp"
 #include <cassert>
 #include <stdexcept>
 #ifndef __EMSCRIPTEN__

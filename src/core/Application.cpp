@@ -1,6 +1,6 @@
 #include "core/Application.hpp"
 #include "core/Context.hpp"
-#include "core/Scheduler.hpp"
+#include "async/Scheduler.hpp"
 #include <chrono>
 
 #ifdef __EMSCRIPTEN__

@@ -1,5 +1,5 @@
-#include "core/Future.hpp"
-#include "core/Scheduler.hpp"
+#include "async/Future.hpp"
+#include "async/Scheduler.hpp"
 
 namespace velox
 {

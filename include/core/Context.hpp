@@ -2,7 +2,7 @@
 #ifndef VELOX_WEB_GPU_CONTEXT_HPP
 #define VELOX_WEB_GPU_CONTEXT_HPP
 #include "common/VeloxErrors.hpp"
-#include "Future.hpp"
+#include "async/Future.hpp"
 #include <cstdint>
 #include <span>
 #include <memory>

@@ -1,5 +1,5 @@
-#include "core/AsyncTasks.hpp"
-#include "core/Scheduler.hpp"
+#include "async/AsyncTasks.hpp"
+#include "async/Scheduler.hpp"
 #include "utility/SlotMap.hpp"
 
 namespace
