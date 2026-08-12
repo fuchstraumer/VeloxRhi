@@ -13,7 +13,7 @@ namespace velox
 TaggedCoroutineSlot::TaggedCoroutineSlot(std::coroutine_handle<> handle) noexcept
     : data{ reinterpret_cast<uintptr_t>(handle.address()) }
 {
-    assert((data & k_readyBit) == 0 && "Coroutine handle not aligned as expected");
+    assert((data & k_tagMask) == 0 && "Coroutine handle not aligned as expected");
 }
 
 TaggedCoroutineSlot::TaggedCoroutineSlot(TaggedCoroutineSlot&& other) noexcept : data{ other.data }
@@ -34,7 +34,7 @@ TaggedCoroutineSlot& TaggedCoroutineSlot::operator=(TaggedCoroutineSlot&& other)
 void TaggedCoroutineSlot::SetHandle(std::coroutine_handle<> handle) noexcept
 {
     uintptr_t ptrValue = reinterpret_cast<uintptr_t>(handle.address());
-    assert((ptrValue & k_readyBit) == 0);
+    assert((ptrValue & k_tagMask) == 0);
 #ifndef __EMSCRIPTEN__
     std::atomic_ref<uintptr_t> dataAtomic{ data };
     dataAtomic.store(ptrValue, std::memory_order::release);
@@ -45,16 +45,50 @@ void TaggedCoroutineSlot::SetHandle(std::coroutine_handle<> handle) noexcept
 
 bool TaggedCoroutineSlot::SetReady(std::coroutine_handle<> handle) noexcept
 {
+    // long explanation incoming, because with cmpexchg and atomics it helps to be clear: especially
+    // if we need to come back and debug or modify this later!
 #ifndef __EMSCRIPTEN__
-    // need to cmpexchg to make sure whole handle didn't change underneath us
-    // we expect to find this address, unchanged yet, and want to set the ready bit
-    uintptr_t expected = reinterpret_cast<uintptr_t>(handle.address());
-    uintptr_t desired = expected | k_readyBit;
+    // need to cmpexchg to make sure the handle didn't change underneath us, but only the pointer bits carry
+    // that identity. SetAbandoned can land on this word at any point from the main thread, and toggle the
+    // abandon bit. this actually makes it *more* important that we're able to set the ready bit, as the ready
+    // bit is required to free the frame. previously, we weren't retrying to set the ready bit, which was fine
+    // without the other potential writer.... but now we need to make sure we succeed, at least if the pointer bits are same!
+    const uintptr_t expected = reinterpret_cast<uintptr_t>(handle.address());
     std::atomic_ref<uintptr_t> dataAtomic{ data };
-    return dataAtomic.compare_exchange_strong(expected, desired, std::memory_order_release);
+    uintptr_t observed = dataAtomic.load(std::memory_order::acquire);
+    // so, to fix the aforementioned problem: while the pointer bits are the same, we will try to set the ready
+    // bit. If the pointer bits change, we will stop trying to set the ready bit, and return false to indicate
+    // that the handle changed underneat us.
+    while ((observed & k_ptrMask) == expected)
+    {
+        // now that we know the pointer bits are the same, we can try to set the ready bit. while doing this,
+        // the abandoned bit could be set by another thread: in that case, use memory_order_acquire to make sure
+        // we see that bit, and then try again to set our bit and use release to indicate we're done
+        if (dataAtomic.compare_exchange_weak(observed,
+                                             observed | k_readyBit,
+                                             std::memory_order::release,
+                                             std::memory_order::acquire))
+        {
+            return true;
+        }
+    }
+
+    return false;
 #else
     data |= k_readyBit;
     return true;
+#endif
+}
+
+void TaggedCoroutineSlot::SetAbandoned() noexcept
+{
+#ifndef __EMSCRIPTEN__
+    // memory_order_release is not strictly required here, but costs next to nothing on x86-64 and is good for our
+    // goal of "thread-hardened" code as we work now instead of immediately threaded. this makes it easier, later.
+    std::atomic_ref<uintptr_t> dataAtomic{ data };
+    dataAtomic.fetch_or(k_abandonedBit, std::memory_order::release);
+#else
+    data |= k_abandonedBit;
 #endif
 }
 
@@ -74,6 +108,24 @@ std::coroutine_handle<> TaggedCoroutineSlot::GetHandleIfReady() const noexcept
     {
         return nullptr;
     }
+}
+
+SlotDisposition TaggedCoroutineSlot::GetDisposition(std::coroutine_handle<>& out_handle) const noexcept
+{
+#ifndef __EMSCRIPTEN__
+    std::atomic_ref<const uintptr_t> dataAtomic{ data };
+    const uintptr_t value = dataAtomic.load(std::memory_order_acquire);
+#else
+    const uintptr_t value = data;
+#endif
+    if ((value & k_readyBit) == 0u)
+    {
+        out_handle = nullptr;
+        return SlotDisposition::Pending;
+    }
+
+    out_handle = std::coroutine_handle<>::from_address(reinterpret_cast<void*>(value & k_ptrMask));
+    return (value & k_abandonedBit) ? SlotDisposition::Destroy : SlotDisposition::Resume;
 }
 
 Scheduler::Scheduler()
@@ -107,15 +159,22 @@ void Scheduler::Tick()
 {
     // use this lambda as the predicate for EraseIf: if the value is ready, we resume it *then* return
     // true in the predicate (so it can be erased. easy!)
+    // an abandoned frame is destroyed rather than resumed: its Future is gone, so there is nobody left to
+    // read the result, and resuming would only run the body and final_suspend to no purpose. destroying
+    // here still runs the suspended awaitable's destructor, which is what releases the wgpu object the
+    // callback deposited into it
     auto erasePredicate = [](TaggedCoroutineSlot& slot) -> bool
     {
-        if (std::coroutine_handle<> coro = slot.GetHandleIfReady())
+        std::coroutine_handle<> coro;
+        switch (slot.GetDisposition(coro))
         {
+        case SlotDisposition::Resume:
             coro.resume();
             return true;
-        }
-        else
-        {
+        case SlotDisposition::Destroy:
+            coro.destroy();
+            return true;
+        default:
             return false;
         }
     };
@@ -132,10 +191,18 @@ bool Scheduler::IsHandleAlive(SlotHandle mapHandle, std::coroutine_handle<> coro
     return slot.GetHandleIfReady() == coroHandle;
 }
 
-void Scheduler::Abandon(SlotHandle mapHandle, std::coroutine_handle<> coroHandle) noexcept
+void Scheduler::Abandon(SlotHandle mapHandle, [[maybe_unused]] std::coroutine_handle<> coroHandle) noexcept
 {
-    // make sure if we get to this, the map has had it's slot erased already
-    assert(!slotMap.Contains(mapHandle));
+    TaggedCoroutineSlot* slot = slotMap.TryGet(mapHandle);
+    if (!slot)
+    {
+        // the slot was already drained by a Tick, so the frame either ran to completion or was resumed and
+        // is no longer ours to hand off. the caller owns it and must destroy it itself
+        assert(coroHandle && coroHandle.done());
+        return;
+    }
+
+    slot->SetAbandoned();
 }
 
 } // namespace velox
