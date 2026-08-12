@@ -33,3 +33,5 @@ struct SubpassDesc
 };
 
 };
+
+#endif // !VELOX_GRAPH_SUBPASS_DESC_HPP
