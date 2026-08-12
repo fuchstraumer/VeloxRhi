@@ -7,13 +7,6 @@
 namespace velox
 {
 
-struct Scheduler;
-
-namespace detail
-{
-    
-}
-
 /**Brainblast moment: this is what holds the promise type. This is what defines the type of the result, what
  * actually carries some type information, and also what owns the coroutine_handle. Scheduler is not just a
  * big pile of type-erased coroutine handles. This simplifies awaitable dispatching tremendously.
@@ -23,35 +16,11 @@ namespace detail
 template<typename T>
 struct Future
 {
-    struct promise_type
+    struct promise_type final : BasePromise
     {
+        using ValueType = T;
         Result<T> result_value;
         std::coroutine_handle<> continuation;
-
-        struct FinalAwaiter
-        {
-            constexpr bool await_ready() const noexcept
-            {
-                return false;
-            }
-
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> handle) noexcept
-            {
-                auto& promise = handle.promise();
-                if (promise.continuation)
-                {
-                    return promise.continuation;
-                }
-                else
-                {
-                    return std::noop_coroutine();
-                }
-            }
-
-            constexpr void await_resume() const noexcept
-            {
-            }
-        };
 
         Future<T> get_return_object() noexcept
         {
@@ -111,28 +80,23 @@ struct Future
 
     ~Future()
     {
-        if (handle && !handle.done())
-        {
-            handle.destroy();
-        }
+        release();
     }
 
     Future(const Future&) = delete;
     Future& operator=(const Future&) = delete;
+
     Future(Future&& other) noexcept : handle{ other.handle }
     {
         other.handle = nullptr;
     }
+
     Future& operator=(Future&& other) noexcept
     {
         if (this != &other)
         {
-            if (handle && !handle.done())
-            {
-                handle.destroy();
-            }
-            handle = other.handle;
-            other.handle = nullptr;
+            release();
+            handle = std::exchange(other.handle, nullptr);
         }
         return *this;
     }
@@ -147,15 +111,39 @@ struct Future
         }
 
         Result<T> value = std::move(handle.promise().result_value);
-        // now clean up coroutine, as we're totally done
-        handle.destroy();
-        handle = nullptr;
+        release(); // call release here too, just to be standard about where we use handle.destroy()
         return value;
     }
 
     constexpr explicit operator bool() const noexcept
     {
         return handle != nullptr;
+    }
+
+private:
+
+    void release() noexcept
+    {
+        if (!handle)
+        {
+            return;
+        }
+
+        if (handle.done())
+        {
+            // body ran to final suspend, so we can destroy the coroutine frame now
+            // (there are no other pending owners, final_suspend was reached, all clear)
+            handle.destroy();
+        }
+        else
+        {
+            // body is still running: get the promise, and use that to hand off to the 
+            // scheduler. the scheduler will tick and destroy the frame once the callback lands
+            auto& promise = handle.promise();
+            promise.Scheduler->Abandon(promise.SlotHandle, handle);
+        }
+
+        handle = nullptr;
     }
 };
 

@@ -31,14 +31,6 @@ struct BasePromise
 };
 
 template<typename PromiseType>
-concept ValidPromiseType = requires(PromiseType promise)
-{
-    typename PromiseType::ValueType;
-    typename PromiseType::ErrorType;
-    
-};
-
-template<typename PromiseType>
 concept ValidPromiseType = 
     std::derived_from<PromiseType, BasePromise> &&
     requires(PromiseType promise)
@@ -46,17 +38,6 @@ concept ValidPromiseType =
         typename PromiseType::ValueType;
         { promise.result_value } -> std::same_as<Result<typename PromiseType::ValueType>&>;
     };
-
-template<typename T>
-concept Awaitable = requires(T&& awaitable)
-{
-    { awaitable.await_ready() } -> std::convertible_to<bool>;
-    { awaitable.await_suspend(std::coroutine_handle<>{}) };
-    { awaitable.await_resume() };
-} || requires(T&& awaitable)
-{
-    { operator co_await(std::forward<T>(awaitable)) } -> Awaitable;
-};
 
 enum class FutureType : uint8_t
 {
@@ -106,7 +87,7 @@ struct SchedulerDispatchedAwaitable
     }
 
     template<ValidPromiseType Promise>
-    std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> coroHandle) noexcept
+    void await_suspend(std::coroutine_handle<Promise> coroHandle) noexcept
     {
         BasePromise& promise = coroHandle.promise();
         if (promise.Scheduler)

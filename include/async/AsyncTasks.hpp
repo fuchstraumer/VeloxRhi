@@ -1,8 +1,8 @@
 #pragma once
 #ifndef VELOX_RHI_ASYNC_TASKS_HPP
 #define VELOX_RHI_ASYNC_TASKS_HPP
-#include "common/VeloxErrors.hpp"
-#include "utility/SlotMap.hpp"
+#include "AsyncCore.hpp"
+#include "Scheduler.hpp"
 #include <coroutine>
 #include <memory>
 #include <webgpu/webgpu_cpp.h>
@@ -14,8 +14,6 @@
 
 namespace velox
 {
-
-struct Scheduler;
 
 namespace detail
 {
@@ -39,7 +37,11 @@ namespace detail
 // and used with await_transform so that it gets forwarded without us needing to pass it
 // even better: move the Future functions to be Context members so they get it direct from that
 
-struct AdapterAwaitable
+// todo-design: It would be nice to wrap WGPU types in a way that we can include just the types and structs
+// required at the header level, and then only include full WGPU headers in source files. This would make
+// things less messy and make portability easier in the future.
+
+struct AdapterAwaitable final : SchedulerDispatchedAwaitable<AdapterAwaitable>
 {
     wgpu::Instance instance;
     wgpu::RequestAdapterOptions options;
@@ -50,13 +52,7 @@ struct AdapterAwaitable
                      wgpu::RequestAdapterOptions _options,
                      Scheduler* _scheduler) noexcept;
 
-    // always suspend
-    constexpr bool await_ready() const noexcept
-    {
-        return false;
-    }
-
-    void await_suspend(std::coroutine_handle<> handle);
+    void Dispatch(Scheduler* _scheduler, SlotHandle slot_handle, std::coroutine_handle<> coro_handle) noexcept;
 
     Result<wgpu::Adapter> await_resume() noexcept;
 
@@ -66,7 +62,7 @@ struct AdapterAwaitable
     }
 };
 
-struct DeviceAwaitable
+struct DeviceAwaitable final : SchedulerDispatchedAwaitable<DeviceAwaitable>
 {
     wgpu::Adapter adapter;
     wgpu::DeviceDescriptor descriptor;
@@ -76,14 +72,7 @@ struct DeviceAwaitable
     DeviceAwaitable(wgpu::Adapter _adapter,
                     wgpu::DeviceDescriptor _descriptor,
                     Scheduler* _scheduler) noexcept;
-
-    constexpr bool await_ready() const noexcept
-    {
-        return false;
-    }
-
-    void await_suspend(std::coroutine_handle<> handle);
-
+    void Dispatch(Scheduler* _scheduler, SlotHandle slot_handle, std::coroutine_handle<> coro_handle) noexcept;
     Result<wgpu::Device> await_resume() noexcept;
 
     constexpr explicit operator bool() const noexcept
@@ -92,7 +81,7 @@ struct DeviceAwaitable
     }
 };
 
-struct MapReadAwaitable
+struct MapReadAwaitable final : SchedulerDispatchedAwaitable<MapReadAwaitable>
 {
 private:
     wgpu::Buffer buffer{};
@@ -107,17 +96,12 @@ public:
                      size_t _offset = 0u,
                      Scheduler* _scheduler = nullptr) noexcept;
 
-    constexpr bool await_ready() const noexcept
-    {
-        return false;
-    }
-
-    void await_suspend(std::coroutine_handle<> handle);
+    void Dispatch(Scheduler* _scheduler, SlotHandle slot_handle, std::coroutine_handle<> coro_handle) noexcept;
 
     Result<const void*> await_resume() const noexcept;
 };
 
-struct MapWriteAwaitable
+struct MapWriteAwaitable final : SchedulerDispatchedAwaitable<MapWriteAwaitable>
 {
 private:
     wgpu::Buffer buffer{};
@@ -132,12 +116,7 @@ public:
                       size_t _offset = 0u,
                       Scheduler* _scheduler = nullptr) noexcept;
 
-    constexpr bool await_ready() const noexcept
-    {
-        return false;
-    }
-
-    void await_suspend(std::coroutine_handle<> handle);
+    void Dispatch(Scheduler* _scheduler, SlotHandle slot_handle, std::coroutine_handle<> coro_handle) noexcept;
 
     Result<void*> await_resume() const noexcept;
 };
@@ -220,7 +199,7 @@ private:
     PointerType mappedPtr;
 };
 
-struct RenderPipelineAwaitable
+struct RenderPipelineAwaitable final : SchedulerDispatchedAwaitable<RenderPipelineAwaitable>
 {
 private:
     wgpu::Device device{};
@@ -235,19 +214,11 @@ public:
     ~RenderPipelineAwaitable() noexcept = default;
     RenderPipelineAwaitable(const RenderPipelineAwaitable&) = delete;
     RenderPipelineAwaitable& operator=(const RenderPipelineAwaitable&) = delete;
-
-    // todo-ship: in the future, we could probably query a cache here and immediate return already built pipelines!
-    // alternatively: hook them up to the same coroutine slot, so they're alerted on wakeup too?
-    constexpr bool await_ready() const noexcept
-    {
-        return false;
-    }
-
-    void await_suspend(std::coroutine_handle<> handle);
+    void Dispatch(Scheduler* _scheduler, SlotHandle slot_handle, std::coroutine_handle<> coro_handle) noexcept;
     Result<wgpu::RenderPipeline> await_resume() noexcept;
 };
 
-struct ComputePipelineAwaitable
+struct ComputePipelineAwaitable final : SchedulerDispatchedAwaitable<ComputePipelineAwaitable>
 {
 private:
     wgpu::Device device{};
@@ -262,13 +233,7 @@ public:
     ~ComputePipelineAwaitable() noexcept = default;
     ComputePipelineAwaitable(const ComputePipelineAwaitable&) = delete;
     ComputePipelineAwaitable& operator=(const ComputePipelineAwaitable&) = delete;
-
-    constexpr bool await_ready() const noexcept
-    {
-        return false;
-    }
-
-    void await_suspend(std::coroutine_handle<> handle);
+    void Dispatch(Scheduler* _scheduler, SlotHandle slot_handle, std::coroutine_handle<> coro_handle) noexcept;
     Result<wgpu::ComputePipeline> await_resume() noexcept;
 };
 

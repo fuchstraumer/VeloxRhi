@@ -5,8 +5,8 @@ namespace velox
 {
 
 AdapterFuture RequestAdapter(wgpu::Instance _instance,
-                              wgpu::RequestAdapterOptions _options,
-                              Scheduler* _scheduler)
+                             wgpu::RequestAdapterOptions _options,
+                             Scheduler* _scheduler)
 {
     auto result = co_await AdapterAwaitable{ _instance,
                                             std::forward<wgpu::RequestAdapterOptions>(_options),
