@@ -33,6 +33,34 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     endif()
 endif()
 
+
+if (MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # relwithdebinfo uses more individual granular flags, but lower overall level + /Zo
+    # that should help keep more debug info around despite the optimization level
+    # rel is just /O2 with a few extras. Note /Ob3 for absolute max inlining
+    add_compile_options(
+        "$<$<CONFIG:Debug>:/Od;/Zi;/EHsc>"
+        "$<$<CONFIG:RelWithDebInfo>:/Ob1;/Oi;/Ot;/Gy;/Zo;/GL;/GR-;>"
+        "$<$<CONFIG:Release>:/O2;/Ob3;/Oi;/Ot;/Gy;/Oy;/GL;/Qpar;/GR->")
+    add_compile_definitions(
+        "$<$<CONFIG:RelWithDebInfo,Release>:_HAS_EXCEPTIONS=0>")
+    add_link_options($<$<CONFIG:Debug>:/DEBUG>)
+    # enable ltcg for relwithdebinfo, but ICF disabled to avoid weird debugger breakpoints
+    add_link_options("$<$<CONFIG:RelWithDebInfo>:/DEBUG;/LTCG;/OPT:NOICF>")
+    add_link_options("$<$<CONFIG:Release>:/LTCG;/OPT:REF;/OPT:ICF>")
+elseif(EMSCRIPTEN)
+    add_compile_options(
+        "$<$<CONFIG:Debug>:-O0;-g>"
+        "$<$<CONFIG:RelWithDebInfo>:-Og;-g;-flto>"
+        "$<$<CONFIG:Release>:-O3;-closure=2;-flto;-fno-exceptions;-fno-rtti;-fno-threadsafe-statics>"
+        "$<$<CONFIG:MinSizeRel>:-Oz;-closure=2;-flto;-fno-exceptions;-fno-rtti;-fno-threadsafe-statics>")
+    add_link_options(
+        "$<$<CONFIG:Debug>:-O0;-g>"
+        "$<$<CONFIG:RelWithDebInfo>:-Og;-g;-flto>"
+        "$<$<CONFIG:Release>:-O3;-closure=2>"
+        "$<$<CONFIG:MinSizeRel>:-Oz;-closure=2;-flto>")
+endif()
+
 if (NOT EMSCRIPTEN)
 
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "Build the GLFW documentation")
@@ -165,42 +193,14 @@ add_library(VeloxRhi STATIC
     ${IMGUI_SOURCES}
     ${OCEAN_FFT_GENERATED_OUTPUTS})
 
-if (MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # relwithdebinfo uses more individual granular flags, but lower overall level + /Zo
-    # that should help keep more debug info around despite the optimization level
-    # rel is just /O2 with a few extras. Note /Ob3 for absolute max inlining
-    target_compile_definitions(VeloxRhi PUBLIC
-        $<$<CONFIG:Debug,RelWithDebInfo>:VELOX_ENABLE_DIAGNOSTICS=1>)
-    target_compile_options(VeloxRhi PUBLIC
-        "$<$<CONFIG:Debug>:/Od;/Zi;/EHsc>"
-        "$<$<CONFIG:RelWithDebInfo>:/Ob1;/Oi;/Ot;/Gy;/Zo;/GL;/GR-;>"
-        "$<$<CONFIG:Release>:/O2;/Ob3;/Oi;/Ot;/Gy;/Oy;/GL;/Qpar;/GR->")
-    target_compile_definitions(VeloxRhi PUBLIC
-        "$<$<CONFIG:RelWithDebInfo,Release>:_HAS_EXCEPTIONS=0>")
-    target_link_options(VeloxRhi PUBLIC $<$<CONFIG:Debug>:/DEBUG>)
-    # enable ltcg for relwithdebinfo, but ICF disabled to avoid weird debugger breakpoints
-    target_link_options(VeloxRhi PUBLIC "$<$<CONFIG:RelWithDebInfo>:/DEBUG;/LTCG;/OPT:NOICF>")
-    target_link_options(VeloxRhi PUBLIC "$<$<CONFIG:Release>:/LTCG;/OPT:REF;/OPT:ICF>")
-elseif(EMSCRIPTEN)
-    target_compile_options(VeloxRhi PUBLIC
-        "$<$<CONFIG:Debug>:-O0;-g>"
-        "$<$<CONFIG:RelWithDebInfo>:-Og;-g;-flto>"
-        "$<$<CONFIG:Release>:-O3;-closure=2;-flto;-fno-exceptions;-fno-rtti;-fno-threadsafe-statics>"
-        "$<$<CONFIG:MinSizeRel>:-Oz;-closure=2;-flto;-fno-exceptions;-fno-rtti;-fno-threadsafe-statics>")
-    target_link_options(VeloxRhi PUBLIC
-        "$<$<CONFIG:Debug>:-O0;-g>"
-        "$<$<CONFIG:RelWithDebInfo>:-Og;-g;-flto>"
-        "$<$<CONFIG:Release>:-O3;-closure=2>"
-        "$<$<CONFIG:MinSizeRel>:-Oz;-closure=2;-flto>")
-endif()
-
 target_include_directories(VeloxRhi PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/backends
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace
     ${CMAKE_CURRENT_BINARY_DIR}/generated)
-
+target_compile_definitions(VeloxRhi PUBLIC
+        $<$<CONFIG:Debug,RelWithDebInfo>:VELOX_ENABLE_DIAGNOSTICS=1>)
 # add mikktspace source, should run through C compiler
 set(VeloxRHI_mikktspace_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace/mikktspace.h"
