@@ -146,6 +146,7 @@ set(VeloxRhi_CoreSources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/InputManager.cpp")
 
 set(VeloxRhi_UtilitySources
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/EnumClassUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/MeshGenerator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/SlotMap.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/utility/MeshGenerator.cpp")
