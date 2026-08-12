@@ -24,10 +24,10 @@ struct Scheduler;
 
 struct BasePromise
 {
-    std::coroutine_handle<> Continuation;
     // todo/design: We may want to promote this to an Interface class, but that's not needed now. Just keep it in mind.
-    Scheduler* Scheduler;
+    Scheduler* Scheduler{ nullptr };
     SlotHandle SlotHandle;
+    std::coroutine_handle<> Continuation{ nullptr};
 };
 
 template<typename PromiseType>
@@ -90,6 +90,10 @@ struct SchedulerDispatchedAwaitable
     void await_suspend(std::coroutine_handle<Promise> coroHandle) noexcept
     {
         BasePromise& promise = coroHandle.promise();
+        // the crucial part, and most of why this trick works: we know the derived type here,
+        // we can directly access the scheduler member. we constrain the promise type to require
+        // this, too!
+        promise.Scheduler = static_cast<Derived*>(this)->scheduler;
         if (promise.Scheduler)
         {
             promise.SlotHandle = promise.Scheduler->Enqueue(coroHandle);

@@ -83,14 +83,12 @@ struct DeviceAwaitable final : SchedulerDispatchedAwaitable<DeviceAwaitable>
 
 struct MapReadAwaitable final : SchedulerDispatchedAwaitable<MapReadAwaitable>
 {
-private:
     wgpu::Buffer buffer{};
     size_t size{ std::numeric_limits<size_t>::max() };
     size_t offset{ 0u };
     Result<const void*> result;
     Scheduler* scheduler{ nullptr };
 
-public:
     MapReadAwaitable(wgpu::Buffer _buffer,
                      size_t _size,
                      size_t _offset = 0u,
@@ -103,14 +101,12 @@ public:
 
 struct MapWriteAwaitable final : SchedulerDispatchedAwaitable<MapWriteAwaitable>
 {
-private:
     wgpu::Buffer buffer{};
     size_t size{ std::numeric_limits<size_t>::max() };
     size_t offset{ 0u };
     Result<void*> result;
     Scheduler* scheduler{ nullptr };
 
-public:
     MapWriteAwaitable(wgpu::Buffer _buffer,
                       size_t _size,
                       size_t _offset = 0u,
@@ -126,7 +122,6 @@ struct MapSession
 {
     using PointerType = std::conditional_t<std::is_same_v<MapReadAwaitable, MapType>, const void*, void*>;
 
-public:
     MapSession(const MapSession&) = delete;
     MapSession& operator=(const MapSession&) = delete;
     ~MapSession()
@@ -185,7 +180,7 @@ public:
         return mappedPtr;
     }
 
-private:
+private:    
     MapSession(wgpu::Buffer _buffer, size_t _size, size_t _offset, PointerType _data) noexcept
         : buffer{ _buffer },
           size{ _size },
@@ -201,13 +196,11 @@ private:
 
 struct RenderPipelineAwaitable final : SchedulerDispatchedAwaitable<RenderPipelineAwaitable>
 {
-private:
     wgpu::Device device{};
     wgpu::RenderPipelineDescriptor descriptor{};
     Result<wgpu::RenderPipeline> result{};
     Scheduler* scheduler{ nullptr };
 
-public:
     RenderPipelineAwaitable(wgpu::Device _device,
                             wgpu::RenderPipelineDescriptor _descriptor,
                             Scheduler* _scheduler) noexcept;
@@ -220,13 +213,11 @@ public:
 
 struct ComputePipelineAwaitable final : SchedulerDispatchedAwaitable<ComputePipelineAwaitable>
 {
-private:
     wgpu::Device device{};
     wgpu::ComputePipelineDescriptor descriptor{};
     Result<wgpu::ComputePipeline> result{};
     Scheduler* scheduler{ nullptr };
 
-public:
     ComputePipelineAwaitable(wgpu::Device _device,
                              wgpu::ComputePipelineDescriptor _descriptor,
                              Scheduler* _scheduler) noexcept;

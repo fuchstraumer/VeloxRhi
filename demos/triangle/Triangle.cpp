@@ -226,7 +226,6 @@ public:
         // sloppy future lifetime test, to try and get a segfault to pop out: only dispatch future for pipeline once,
         // toggle this bool, and then destroy the future immediately after dispatching it. If the future is destroyed, the callback lambda
         // will still have the handle to the future, and when it tries to resume the coroutine, it will be a dangling handle. This is a test to see if we can get a segfault to pop out of this.
-        static bool dispatchedFuture = false;
         using namespace wgpu;
         if (!shaderModule)
         {
@@ -294,7 +293,7 @@ public:
         }
 
         // undispatched. dispatch future and populate 
-        if (!dispatchedFuture && !pipelineFuture && !pipeline)
+        if (!pipelineFuture && !pipeline)
         {
             ColorTargetState colorTarget{};
             colorTarget.format = GetContext().GetSurfaceFormat();
@@ -374,10 +373,6 @@ public:
             pipelineDesc.primitive = primitiveState;
 
             pipelineFuture = RequestRenderPipeline(GetContext().GetDevice(), pipelineDesc, GetContext().GetScheduler());
-            // attempt to break this by destroying future immediately, so we can see what happens
-            pipelineFuture = {};
-            // toggle future so we just loop on init waiting for it
-            dispatchedFuture = true;
             // returning this indicates all is as expected, but phase hasn't evolved
             return LifecyclePhase::Initialization;
         }
