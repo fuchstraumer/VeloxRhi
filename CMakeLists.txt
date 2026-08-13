@@ -145,6 +145,23 @@ set(VeloxRhi_CoreSources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Context.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/InputManager.cpp")
 
+set(VeloxRhi_GraphSources
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/graph/GraphBuilder.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/graph/ResourceBinding.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/graph/ResourceDeclaration.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/graph/ResourceFlagConversions.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/graph/ResourceFlags.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/graph/ResourceHandle.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/graph/SubpassBuilder.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/graph/ResourceFlagConversions.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/graph/SubpassDesc.hpp")
+
+# The vocabulary the shader cooker writes and the rendergraph reads. The cooker compiles these same
+# files, so the offline tool and the runtime cannot disagree about what a binding is.
+set(VeloxRhi_ShaderSources
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/shader/ShaderLibraryTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/shader/ShaderLibraryTypes.cpp")
+
 set(VeloxRhi_UtilitySources
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/EnumClassUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/MeshGenerator.hpp"
@@ -188,6 +205,7 @@ add_library(VeloxRhi STATIC
     ${VeloxRhi_AsyncSources}
     ${VeloxRhi_CommonSources}
     ${VeloxRhi_CoreSources}
+    ${VeloxRhi_ShaderSources}
     ${VeloxRhi_UtilitySources}
     ${VeloxRhi_SharedMathSources}
     ${VeloxRhi_BackendMathSources}
@@ -212,6 +230,7 @@ target_sources(VeloxRhi PRIVATE ${VeloxRHI_mikktspace_SOURCES})
 source_group("rhi\\async" FILES ${VeloxRhi_AsyncSources})
 source_group("rhi\\common" FILES ${VeloxRhi_CommonSources})
 source_group("rhi\\core" FILES ${VeloxRhi_CoreSources})
+source_group("rhi\\shader" FILES ${VeloxRhi_ShaderSources})
 source_group("rhi\\utility" FILES ${VeloxRhi_UtilitySources})
 source_group("rhi\\math" FILES ${VeloxRhi_SharedMathSources} ${VeloxRhi_BackendMathSources})
 source_group("rhi\\imgui" FILES ${IMGUI_SOURCES})
