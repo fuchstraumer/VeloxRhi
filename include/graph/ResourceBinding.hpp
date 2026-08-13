@@ -105,6 +105,46 @@ struct TextureBinding
     TextureRange range{ k_wholeTexture };
 };
 
+enum class LoadOp : uint8_t
+{
+    Invalid = 0,
+    Load,
+    Clear
+};
+
+enum class StoreOp : uint8_t
+{
+    Invalid = 0,
+    Store,
+    Discard
+};
+
+struct ColorAttachmentBinding
+{
+    TextureHandle Resource{};
+    LoadOp LoadOp{ LoadOp::Invalid };
+    StoreOp StoreOp{ StoreOp::Invalid };
+    struct ColorClear
+    {
+        float r{ 0.0f };
+        float g{ 0.0f };
+        float b{ 0.0f };
+        float a{ 1.0f };
+    };
+};
+
+struct DepthAttachmentBinding
+{
+    TextureHandle Resource{};
+    LoadOp LoadOp{ LoadOp::Invalid };
+    StoreOp StoreOp{ StoreOp::Invalid };
+    struct DepthClear
+    {
+        float depth{ 1.0f };
+        uint32_t stencil{ 0u };
+    };
+};
+
 } // namespace velox
 
 #endif // !VELOX_GRAPH_RESOURCE_USAGE_HPP

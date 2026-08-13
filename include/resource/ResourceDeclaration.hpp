@@ -12,7 +12,7 @@
  * @brief Declarations describing how a resource comes into existence, separate from how a subpass
  * uses one (ResourceUsage.hpp).
  *
- * This split is vital for handling cases like a graph refreshing due to a change feature (which could 
+ * This split is vital for handling cases like a graph refreshing due to a changed feature (which could 
  * come from something like performance scaling, for example). The graph is recompiled, but for resources
  * that already exist and don't need to respond, we can just rebind them to the new graph. This helps
  * reduce a whole class of hitches and perf sinks.

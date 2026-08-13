@@ -24,6 +24,8 @@ struct SubpassDesc
     TemplateNodeHandle Template{ TemplateNodeHandle::Invalid() };
     std::vector<BufferBinding> Buffers;
     std::vector<TextureBinding> Textures;
+    std::vector<ColorAttachmentBinding> ColorAttachments;
+    DepthAttachmentBinding DepthAttachment{};
     // Explicit deps, including sentinel nodes like "FrameStart" and "FrameEnd"
     std::vector<NodeHandle> Dependencies;
     // instead of using a variant or union, just going to store both of these

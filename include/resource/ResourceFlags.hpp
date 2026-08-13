@@ -131,4 +131,4 @@ enum class TextureViewDimension : uint8_t
 
 } // namespace velox
 
-#endif // !VELOX_GRAPH_RESOURCE_FLAGS_HPP
+#endif // !VELOX_RESOURCE_FLAGS_HPP
