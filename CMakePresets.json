@@ -5,7 +5,12 @@
             "name" : "ninja-base-multi",
             "hidden" : true,
             "generator" : "Ninja Multi-Config",
-            "binaryDir" : "${sourceDir}/build/${presetName}",
+            "binaryDir" : "${sourceDir}/build/${presetName}"
+        },
+        {
+            "name" : "ninja-x64",
+            "hidden" : true,
+            "inherits" : "ninja-base-multi",
             "architecture": {
                 "value" : "x64",
                 "strategy" : "external"
@@ -17,17 +22,17 @@
         },
         {
             "name": "ninja-msvc",
-            "displayName" : "Windows x64 MSVC",
-            "inherits" : "ninja-base-multi",
+            "displayName" : "Win64 MSVC",
+            "inherits" : "ninja-x64",
             "cacheVariables": {
                 "CMAKE_C_COMPILER" : "cl.exe",
                 "CMAKE_CXX_COMPILER": "cl.exe"
             }
         },
         {
-            "name" : "ninja-clang",
-            "displayName" : "Windows x64 Clang",
-            "inherits" : "ninja-base-multi",
+            "name" : "ninja-msvc-clang",
+            "displayName" : "Win64 Clang-CL",
+            "inherits" : "ninja-x64",
             "cacheVariables" : {
                 "CMAKE_C_COMPILER" : "clang-cl.exe",
                 "CMAKE_CXX_COMPILER" : "clang-cl.exe"
@@ -36,7 +41,7 @@
         {
             "name" : "emscripten",
             "displayName" : "Emscripten",
-            "inherits" : "ninja-base-multi",
+            "inherits" : "ninja-x64",
             "binaryDir" : "${sourceDir}/build/${presetName}",
             "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
         }
@@ -44,54 +49,56 @@
     "buildPresets": [
         {
             "name": "windows-ninja-msvc-debug",
+            "displayName": "Win64 MSVC Debug",
             "description": "Builds the project using the Windows x64 MSVC (Ninja) configure preset",
             "configurePreset": "ninja-msvc",
             "configuration": "Debug"
         },
         {
-            "name": "windows-ninja-clang-debug",
-            "description": "Builds the project using the Windows x64 Clang (Ninja) configure preset",
-            "configurePreset": "ninja-clang",
-            "configuration": "Debug"
+            "name" : "windows-ninja-clang-debug",
+            "displayName": "Win64 Clang Debug",
+            "description" : "Builds the project using the Windows x64 Clang (MSVC Install) configure preset",
+            "configurePreset" : "ninja-msvc-clang",
+            "configuration" : "Debug"
         },
         {
             "name" : "windows-ninja-msvc-relwithdebinfo",
+            "displayName": "Win64 MSVC RelWithDebInfo",
             "description" : "Builds the project using the Windows x64 MSVC (Ninja) configure preset",
             "configurePreset" : "ninja-msvc",
             "configuration" : "RelWithDebInfo"
         },
         {
             "name" : "windows-ninja-clang-relwithdebinfo",
-            "description" : "Builds the project using the Windows x64 Clang (Ninja) configure preset",
-            "configurePreset" : "ninja-clang",
+            "displayName": "Win64 Clang RelWithDebInfo",
+            "description" : "Builds the project using the Windows x64 Clang (MSCV Install) configure preset",
+            "configurePreset" : "ninja-msvc-clang",
             "configuration" : "RelWithDebInfo"
         },
         {
-            "name" : "windows-ninja-msvc-release",
-            "description" : "Builds the project using the Windows x64 MSVC (Ninja) configure preset",
-            "configurePreset" : "ninja-msvc",
-            "configuration" : "Release"
-        },
-        {
             "name" : "emscripten-build-debug",
+            "displayName": "Emscripten Debug",
             "description" : "Builds the project using the Emscripten configure preset",
             "configurePreset" : "emscripten",
             "configuration" : "Debug"
         },
         {
             "name" : "emscripten-build-relwithdebinfo",
+            "displayName": "Emscripten RelWithDebInfo",
             "description" : "Builds the project using the Emscripten configure preset",
             "configurePreset" : "emscripten",
             "configuration" : "RelWithDebInfo"
         },
         {
             "name" : "emscripten-build-release",
+            "displayName": "Emscripten Release",
             "description" : "Builds the project using the Emscripten configure preset",
             "configurePreset" : "emscripten",
             "configuration" : "Release"
         },
         {
-            "name" : "emscripten-build-minsizerel",
+            "name" : "emscripten-build-minsize",
+            "displayName": "Emscripten MinSizeRel",
             "description" : "Builds the project using the Emscripten configure preset",
             "configurePreset" : "emscripten",
             "configuration" : "MinSizeRel"

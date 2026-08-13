@@ -1,5 +1,11 @@
 {
     "git.ignoreLimitWarning": true,
     "cmake.buildDirectory": "${workspaceFolder}/build",
-    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "files.watcherExclude": {
+        "build/**": true,
+        "third_party/slang/**": true,
+        "third_party/dawn/third_party/**": true,
+        "third_party/glfw/**": true
+    }
 }

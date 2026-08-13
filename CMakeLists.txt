@@ -10,6 +10,17 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # cmake/ contains our own FindVulkanHeaders.cmake; must be set before any find_package calls
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# include our various scripts: most of these in cmake/ are just to reduce targets we don't
+# need across the fairly massive surface of third_party deps we pull in. As this project
+# in particular is a scoped endpoint, this is fairly safe to do
+include(cmake/ConfigureDawn.cmake)
+include(cmake/ConfigureBuildFlags.cmake)
+include(cmake/ConfigureMiscThirdParty.cmake)
+
+if (NOT EMSCRIPTEN)
+    include(cmake/ConfigureSlang.cmake)
+endif()
+
 # need this to generate various support files for the ocean fft
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -19,46 +30,28 @@ if (NOT EMSCRIPTEN)
     set(VulkanHeaders_INCLUDE_DIR ${Vulkan_INCLUDE_DIR} CACHE PATH "" FORCE)
 endif()
 
-# flags required to make things work at baseline on desktop toolchains (ime)
-if (MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # MSVC specific flags
-    # /MP: Tells cl.exe to multithread
-    # /bigobj: Increases number of sections in .obj (slang can bump into this ime)
-    # /arch:AVX2: Enables AVX2 instructions
-    add_compile_options(/MP /bigobj /arch:AVX2)
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Clang specific flags
-    if (NOT EMSCRIPTEN)
-        add_compile_options(-mavx2)
+
+if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT EMSCRIPTEN)
+    if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "Clang")
+        message(FATAL_ERROR "Clang-CL in MSVC frontend variant is not supported. Please use a different compiler.")
+    else()
+        add_msvc_exclusive_build_flags_all_targets()
+        add_shared_msvc_style_build_flags_all_targets()
     endif()
-endif()
-
-
-if (MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # relwithdebinfo uses more individual granular flags, but lower overall level + /Zo
-    # that should help keep more debug info around despite the optimization level
-    # rel is just /O2 with a few extras. Note /Ob3 for absolute max inlining
-    add_compile_options(
-        "$<$<CONFIG:Debug>:/Od;/Zi;/EHsc>"
-        "$<$<CONFIG:RelWithDebInfo>:/Ob1;/Oi;/Ot;/Gy;/Zo;/GL;/GR-;>"
-        "$<$<CONFIG:Release>:/O2;/Ob3;/Oi;/Ot;/Gy;/Oy;/GL;/Qpar;/GR->")
-    add_compile_definitions(
-        "$<$<CONFIG:RelWithDebInfo,Release>:_HAS_EXCEPTIONS=0>")
-    add_link_options($<$<CONFIG:Debug>:/DEBUG>)
-    # enable ltcg for relwithdebinfo, but ICF disabled to avoid weird debugger breakpoints
-    add_link_options("$<$<CONFIG:RelWithDebInfo>:/DEBUG;/LTCG;/OPT:NOICF>")
-    add_link_options("$<$<CONFIG:Release>:/LTCG;/OPT:REF;/OPT:ICF>")
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT EMSCRIPTEN)
+    if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        # Running as clang, but with MSVC frontend (clang-cl as shim layer)
+        add_shared_msvc_style_build_flags_all_targets()
+        disable_msvc_frontend_clang_compiler_warnings_all_targets()
+    else()
+        add_clang_style_build_flags_all_targets()
+    endif()
 elseif(EMSCRIPTEN)
-    add_compile_options(
-        "$<$<CONFIG:Debug>:-O0;-g>"
-        "$<$<CONFIG:RelWithDebInfo>:-Og;-g;-flto>"
-        "$<$<CONFIG:Release>:-O3;-closure=2;-flto;-fno-exceptions;-fno-rtti;-fno-threadsafe-statics>"
-        "$<$<CONFIG:MinSizeRel>:-Oz;-closure=2;-flto;-fno-exceptions;-fno-rtti;-fno-threadsafe-statics>")
-    add_link_options(
-        "$<$<CONFIG:Debug>:-O0;-g>"
-        "$<$<CONFIG:RelWithDebInfo>:-Og;-g;-flto>"
-        "$<$<CONFIG:Release>:-O3;-closure=2>"
-        "$<$<CONFIG:MinSizeRel>:-Oz;-closure=2;-flto>")
+    add_emscripten_build_flags_all_targets()
+else()
+    message(STATUS
+        "Could not find supported compiler. Please use Clang, MSVC, or Emscripten and make sure they are on your PATH.")
+    message(FATAL_ERROR "Unsupported compiler: ${CMAKE_CXX_COMPILER_ID}")
 endif()
 
 if (NOT EMSCRIPTEN)
@@ -66,17 +59,16 @@ if (NOT EMSCRIPTEN)
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "Build the GLFW documentation")
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Build the GLFW example programs")
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "Build the GLFW test programs")
+    set(GLFW_INSTALL OFF CACHE BOOL "Generate installation target")
     set(GLFW_LIBRARY_TYPE "STATIC" CACHE STRING "Library type override for GLFW (SHARED, STATIC, OBJECT, or empty to follow BUILD_SHARED_LIBS)")
     add_subdirectory(third_party/glfw)
     set_target_properties(glfw PROPERTIES FOLDER "third_party")
 
-    include(cmake/ConfigureSlang.cmake)
     add_subdirectory(third_party/slang EXCLUDE_FROM_ALL)
     organize_slang_targets()
 
 endif()
 
-include(cmake/ConfigureDawn.cmake)
 add_subdirectory(third_party/dawn EXCLUDE_FROM_ALL)
 
 set(MAGIC_ENUM_OPT_BUILD_EXAMPLES OFF)
@@ -160,7 +152,9 @@ set(VeloxRhi_GraphSources
 # files, so the offline tool and the runtime cannot disagree about what a binding is.
 set(VeloxRhi_ShaderSources
     "${CMAKE_CURRENT_SOURCE_DIR}/include/shader/ShaderLibraryTypes.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/shader/ShaderLibraryTypes.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/shader/ShaderLibraryTypes.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/shader/ShaderManifest.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/shader/ShaderManifest.cpp")
 
 set(VeloxRhi_UtilitySources
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/EnumClassUtils.hpp"
@@ -213,11 +207,11 @@ add_library(VeloxRhi STATIC
     ${OCEAN_FFT_GENERATED_OUTPUTS})
 
 target_include_directories(VeloxRhi PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/backends
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace
-    ${CMAKE_CURRENT_BINARY_DIR}/generated)
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/backends"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_definitions(VeloxRhi PUBLIC
         $<$<CONFIG:Debug,RelWithDebInfo>:VELOX_ENABLE_DIAGNOSTICS=1>)
 # add mikktspace source, should run through C compiler
