@@ -7,27 +7,6 @@
 namespace velox
 {
 
-namespace detail
-{
-    consteval Scheduler* PickScheduler() noexcept
-    {
-        return nullptr;
-    }
-
-    template<typename First, typename...Rest>
-    consteval Scheduler* PickScheduler(First first, Rest...rest) noexcept
-    {
-        if constexpr (std::is_same_v<std::remove_cvref_t<First>, Scheduler*>)
-        {
-            return first;
-        }
-        else
-        {
-            return PickScheduler(rest...);
-        }
-    }
-}
-
 /**Brainblast moment: this is what holds the promise type. This is what defines the type of the result, what
  * actually carries some type information, and also what owns the coroutine_handle. Scheduler is not just a
  * big pile of type-erased coroutine handles. This simplifies awaitable dispatching tremendously.
@@ -39,12 +18,6 @@ struct Future
 {
     struct promise_type final : BasePromise
     {
-        /*template<typename...Args>
-        explicit promise_type(Args&&..args) noexcept :
-            BasePromise{ .scheduler{ detail::PickScheduler(std::forward<Args>(args)...) } }
-        {
-        }*/
-
         using ValueType = T;
         Result<T> result_value;
 
