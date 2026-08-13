@@ -7,14 +7,10 @@
 #include <string_view>
 
 /**
- * @brief The vocabulary the shader cooker writes and the rendergraph reads.
- *
- * This header is hand-written, not generated. The rendergraph includes this file. It never includes
- * the generated shader library. Compile() therefore does not know that the library is generated code,
- * and a change to the cooker's output format does not reach the graph.
- *
- * Texture formats and view dimensions come from ResourceFlags.hpp. One definition serves both the
- * resource layer and the cooker, so the two cannot disagree.
+ * @brief The vocabulary the shader cooker writes and the rendergraph reads. This header is the contract
+ * between the Cooker and clients that want to use the data the cooker produces. Texture formats and view
+ * dimensions come from ResourceFlags.hpp. One definition serves both the resource layer and the cooker, so
+ * the two cannot disagree.
  */
 namespace velox
 {
@@ -39,8 +35,8 @@ enum class ShaderStageKind : uint8_t
     Compute,
 };
 
-/** @brief The shape of a bound resource, as the shader declares it. This decides the view dimension
- * the graph must create. The shader is the only authority here: the CPU side never states it. */
+/** @brief The shape of a bound resource, as the shader declares it. This should be viewed
+ * as authoritative, where the CPU side only follows from this. */
 enum class ResourceShape : uint8_t
 {
     Invalid = 0,
@@ -54,8 +50,8 @@ enum class ResourceShape : uint8_t
     Texture2DMultisample,
 };
 
-/** @brief How a shader samples a texture. The graph checks this against the format it creates: a
- * shader that samples a float texture cannot bind an integer one. */
+/** @brief How a shader samples a texture. Users can check this against
+ * the formats they create or bind for validation. */
 enum class TextureSampleType : uint8_t
 {
     Invalid = 0,
@@ -66,7 +62,8 @@ enum class TextureSampleType : uint8_t
     UnsignedInteger,
 };
 
-/** @brief What a shader does to a storage texture. */
+/** @brief What a shader does to a storage texture. Stored as separate flags from
+ * from a shared accessor since Buffers are either RW or read-only */
 enum class StorageTextureAccess : uint8_t
 {
     Invalid = 0,
@@ -83,7 +80,44 @@ enum class SamplerBindingType : uint8_t
     Comparison,
 };
 
-/** @brief Compute workgroup dimensions. The shader declares these, so they are always reflectable. */
+/** @brief The scalar type of one vertex attribute or one color target. */
+enum class VertexScalarType : uint8_t
+{
+    Invalid = 0,
+    Float16,
+    Float32,
+    SignedInteger32,
+    UnsignedInteger32,
+};
+
+/** @brief One vertex shader input.
+ *
+ * WGSL keeps only `@location`. The semantic name and index live in the Slang source and in no part of
+ * the emitted text, so the semantic information would be lost: we store it in cooked layout/reflection
+ * data packed alongside source. */
+struct VertexAttributeInfo
+{
+    std::string_view SemanticName;
+    uint32_t SemanticIndex{ 0u };
+    uint32_t Location{ 0u };
+    VertexScalarType ScalarType{ VertexScalarType::Invalid };
+    uint32_t ComponentCount{ 0u };
+};
+
+/** @brief One fragment shader color target.
+ *
+ * The format is absent, and it cannot be derived. `float4 : SV_Target0` could be Rgba8Unorm or
+ * Rgba16Float. Shader reflection gives what it can, but the rest is up to the caller configuring
+ * pipelines and renderpasses. */
+struct ColorTargetInfo
+{
+    uint32_t Location{ 0u };
+    VertexScalarType ScalarType{ VertexScalarType::Invalid };
+    uint32_t ComponentCount{ 0u };
+};
+
+/** @brief Compute workgroup thread dimensions. The shader declares these, so they are always reflectable.
+ * Clients may use these along with known input data sizes to calculate workgroup sizes exactly. */
 struct WorkgroupSize
 {
     uint32_t X{ 1u };
@@ -91,19 +125,26 @@ struct WorkgroupSize
     uint32_t Z{ 1u };
 };
 
-/** @brief One resource a shader binds, as the generated library states it.
- *
- * This is the runtime form of the cooker's ReflectedBinding. It views strings instead of owning them,
- * because every string points into the generated data.
- *
- * Compile() looks up a name here and takes the group and the binding from the result. No caller ever
- * writes a group index or a binding index, so the two sides cannot drift apart.
+/** @brief One member of a uniform block, with the offset and the size the shader gave it.
+ *  Use this to validate that CPU-size structs match the layout expected by the shader. */
+struct UniformMemberInfo
+{
+    std::string_view Name;
+    uint32_t Offset{ 0u };
+    uint32_t Size{ 0u };
+    uint32_t ArrayCount{ 1u };
+};
+
+/** @brief One resource a shader binds, as the generated library states it. This is the optimized and
+ * compact form of the cooker's `ReflectedBinding`. Strings are stored in the cooked data, so views
+ * are used here instead of owning strings. It is critical to use the group and binding indices
+ * declared here to avoid errors and crashes.
  */
 struct BindingInfo
 {
     std::string_view Name;
-    uint32_t Group{ 0u };
-    uint32_t Binding{ 0u };
+    uint32_t Group{ static_cast<uint32_t>(-1) };
+    uint32_t Binding{ static_cast<uint32_t>(-1) };
     BindingKind Kind{ BindingKind::Invalid };
 
     /** @brief Size of one structured buffer element, in bytes. Zero for a texture or a sampler. */
@@ -111,10 +152,11 @@ struct BindingInfo
     /** @brief Total size of a uniform block, in bytes. Zero for every other binding kind. */
     uint64_t ByteSize{ 0u };
     uint32_t ArrayCount{ 1u };
-
+    /** @brief Shape is Buffer/Texture[N]/Sampler, etc */
     ResourceShape Shape{ ResourceShape::Invalid };
     TextureSampleType SampleType{ TextureSampleType::Invalid };
     TextureFormat StorageFormat{ TextureFormat::Invalid };
+    /** @note Unlike a `Buffer`, `StorageTexture` access type is not part of the Shape value */
     StorageTextureAccess StorageAccess{ StorageTextureAccess::Invalid };
     SamplerBindingType SamplerType{ SamplerBindingType::Invalid };
 
@@ -122,33 +164,43 @@ struct BindingInfo
      * variant. Zero means the shader did not annotate the resource, so the caller must give a size. */
     uint64_t DerivedElementCount{ 0u };
     /** @brief Texture extent from a `[vx_extent_2d]` or `[vx_extent_3d]` annotation. Zero width means
-     * the shader did not annotate the resource. */
+     * the shader did not annotate the resource. This means the caller must drive and set the sizing.*/
     uint32_t DerivedExtentX{ 0u };
     uint32_t DerivedExtentY{ 0u };
     uint32_t DerivedExtentZ{ 0u };
 
+    /** @brief The members of a uniform block. Empty for every other binding kind. */
+    std::span<const UniformMemberInfo> Members;
+
     /** @brief Byte size the graph must create, or zero when the shader states no element count. */
     [[nodiscard]] uint64_t DerivedByteSize() const noexcept;
+    /** @brief Validate the resource binding, ensuring it is correctly configured. */
+    [[nodiscard]] bool Validate() const noexcept;
 };
 
+/** @brief Finds one uniform block member by name. A missing name returns nullptr, and that must be an
+ * error: it means the CPU side names a field the shader does not have. */
+[[nodiscard]] const UniformMemberInfo* FindUniformMember(std::span<const UniformMemberInfo> members,
+                                                         std::string_view name) noexcept;
+
 /**
- * @brief Where the rendergraph gets shader sources and layouts.
+ * @brief Where the rendergraph gets shader sources and layouts. This is a virtual base class
+ * so that we can choose to use a provider reading from baked source - or a provider that reads
+ * from memory and can provide live-edit functionality. Clients binding and using shaders
+ * and their reflection data should not care where it comes from.
  *
- * The generated library implements this. A future watch-and-serve cooker implements it again, and
- * talks to a running engine. The graph sees no difference between the two.
+ * `Generation()` is the future hot-reload hook. A provider for baked data will always return the same value,
+ * but a live provider can increment the value when any source changes - allowing users to reload
+ * shaders and reset state gracefully
  *
- * The interface takes a raw `uint16_t` for the entry point, not the generated `EntryPointId` enum.
- * The graph therefore never includes the generated header, and a change to the shader set does not
- * recompile the graph.
- *
- * `Generation()` is the hot-reload hook. The baked provider returns a constant. A live provider
- * increments the counter when a shader changes, and the graph re-realizes the affected pipelines.
+ * todo-ship: Find a better approach for EntryPointId than setting the 0th value to 1. That's brittle
+ * and breaks assumptions about indexing from zero.
  */
 class ShaderSourceProvider
 {
 public:
     ShaderSourceProvider() noexcept;
-    virtual ~ShaderSourceProvider();
+    virtual ~ShaderSourceProvider() noexcept;
     ShaderSourceProvider(const ShaderSourceProvider&) = delete;
     ShaderSourceProvider& operator=(const ShaderSourceProvider&) = delete;
 
