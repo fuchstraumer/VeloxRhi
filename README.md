@@ -6,3 +6,5 @@ This is *not* intended to be a graphics engine at all - there's no input, no pus
 ## Building
 
 (Get into generated files, cooking shaders for webgpu, etc, this still needs work because we barely have it working for us locally)
+
+Remember to modify third_party\dawn\src\dawn\glfw\utils_emscripten.cpp to add `#include "src/utils/platform.h"` at L27, since compile breaks totally otherwise

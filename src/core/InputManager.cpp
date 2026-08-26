@@ -64,15 +64,15 @@ InputManager::~InputManager()
 void InputManager::Initialize(void* platform_window)
 {
 #ifndef __EMSCRIPTEN__
-    GLFWwindow* Window = reinterpret_cast<GLFWwindow*>(platform_window);
-    glfwSetWindowUserPointer(Window, this);
-    glfwSetCursorPosCallback(Window, CursorPositionCallback);
-    glfwSetCursorEnterCallback(Window, CursorEnterCallback);
-    glfwSetScrollCallback(Window, ScrollCallback);
-    glfwSetCharCallback(Window, CharCallback);
-    glfwSetMouseButtonCallback(Window, MouseButtonCallback);
-    glfwSetKeyCallback(Window, KeyboardCallback);
-    glfwSetWindowFocusCallback(Window, FocusCallback);
+    GLFWwindow* window = reinterpret_cast<GLFWwindow*>(platform_window);
+    glfwSetWindowUserPointer(window, this);
+    glfwSetCursorPosCallback(window, CursorPositionCallback);
+    glfwSetCursorEnterCallback(window, CursorEnterCallback);
+    glfwSetScrollCallback(window, ScrollCallback);
+    glfwSetCharCallback(window, CharCallback);
+    glfwSetMouseButtonCallback(window, MouseButtonCallback);
+    glfwSetKeyCallback(window, KeyboardCallback);
+    glfwSetWindowFocusCallback(window, FocusCallback);
 #else
     emscripten_set_mousemove_callback("#canvas", this, false, EmMouseMoveCallback);
     emscripten_set_mousedown_callback("#canvas", this, false, EmMouseButtonCallback);
@@ -92,7 +92,7 @@ void InputManager::Initialize(void* platform_window)
 
 void InputManager::PostEvent(InputEvent event, double timestamp_ms)
 {
-    incomingEvents.push_back(ReceivedEvent{ timestamp_ms, std::move(event) });
+    incomingEvents.push_back(ReceivedEvent{ .Time=timestamp_ms, .EventData=event });
 }
 
 std::span<const ReceivedEvent> InputManager::GetEventsForFrame() const noexcept
@@ -108,8 +108,8 @@ std::span<const GestureEvent> InputManager::GetGesturesForFrame() const noexcept
 void InputManager::PrepareFrame() noexcept
 {
     // todo-ship: consider erasing only events older than the focus event when losing focus
-    auto iter = std::find_if(incomingEvents.begin(),
-                             incomingEvents.end(),
+    auto iter = std::ranges::find_if(incomingEvents,
+
                              [](const ReceivedEvent& e)
                              {
                                  return std::holds_alternative<FocusEvent>(e.EventData);
@@ -118,8 +118,8 @@ void InputManager::PrepareFrame() noexcept
     if (iter != incomingEvents.end())
     {
 
-        auto CurrFocusEvent = std::get<FocusEvent>(iter->EventData);
-        if (!CurrFocusEvent.Focused)
+        auto currFocusEvent = std::get<FocusEvent>(iter->EventData);
+        if (!currFocusEvent.Focused)
         {
             gestureState = GestureRecognizerState{};
             activeTouchPositions.clear();
@@ -139,17 +139,17 @@ void InputManager::PrepareFrame() noexcept
     evaluateGestures();
 }
 
-void InputManager::processCursorPositionEvent(const CursorPositionEvent& cursorPosEvent)
+void InputManager::processCursorPositionEvent(const CursorPositionEvent& cursor_pos_event)
 {
     if (gestureState.MouseDragging)
     {
-        PanGestureEvent panEvent{ cursorPosEvent.X - gestureState.LastMouseX,
-                                  cursorPosEvent.Y - gestureState.LastMouseY };
-        gestureEvents.emplace_back(std::move(panEvent));
+        PanGestureEvent panEvent{ .DeltaX=(cursor_pos_event.X - gestureState.LastMouseX),
+                                  .DeltaY=(cursor_pos_event.Y - gestureState.LastMouseY) };
+        gestureEvents.emplace_back(panEvent);
     }
 
-    gestureState.LastMouseX = cursorPosEvent.X;
-    gestureState.LastMouseY = cursorPosEvent.Y;
+    gestureState.LastMouseX = cursor_pos_event.X;
+    gestureState.LastMouseY = cursor_pos_event.Y;
 }
 
 void InputManager::setMouseDragging(const PointerState& state) noexcept
@@ -164,31 +164,32 @@ void InputManager::setMouseDragging(const PointerState& state) noexcept
     }
 }
 
-void InputManager::processPointerPressEvent(const double eventTime, const PointerEvent& pointerEvent)
+void InputManager::processPointerPressEvent(const double event_time, const PointerEvent& pointer_event)
 {
     if (activeTouchPositions.empty())
     {
-        gestureState.GestureStartTime = eventTime;
+        gestureState.GestureStartTime = event_time;
         gestureState.GestureCouldBeTap = true;
     }
 
-    activeTouchPositions[pointerEvent.ID] =
-        TouchState{ pointerEvent.X, pointerEvent.Y, pointerEvent.X, pointerEvent.Y, eventTime };
+    activeTouchPositions[pointer_event.ID] = TouchState{ .X=pointer_event.X, .Y=pointer_event.Y,
+                                                         .StartX=pointer_event.X, .StartY=pointer_event.Y,
+                                                         .StartTime=event_time };
     gestureState.MaxSimultaneousTouches =
         std::max(gestureState.MaxSimultaneousTouches, static_cast<uint32_t>(activeTouchPositions.size()));
 }
 
-void InputManager::processPointerReleaseOrCancelEvent(const double eventTime,
-                                                      const PointerEvent& pointerEvent)
+void InputManager::processPointerReleaseOrCancelEvent(const double event_time,
+                                                      const PointerEvent& pointer_event)
 {
-    auto prevTouchIter = activeTouchPositions.find(pointerEvent.ID);
+    auto prevTouchIter = activeTouchPositions.find(pointer_event.ID);
     if (prevTouchIter != activeTouchPositions.end())
     {
-        if (pointerEvent.State == PointerState::Released)
+        if (pointer_event.State == PointerState::Released)
         {
-            const double Duration = eventTime - prevTouchIter->second.StartTime;
-            const float Dx = pointerEvent.X - prevTouchIter->second.StartX;
-            const float Dy = pointerEvent.Y - prevTouchIter->second.StartY;
+            const double Duration = event_time - prevTouchIter->second.StartTime;
+            const float Dx = pointer_event.X - prevTouchIter->second.StartX;
+            const float Dy = pointer_event.Y - prevTouchIter->second.StartY;
             const float TotalDist = std::hypot(Dx, Dy);
 
             if (TotalDist > gestureConfig.TapMaxDistancePx)
@@ -200,12 +201,12 @@ void InputManager::processPointerReleaseOrCancelEvent(const double eventTime,
                 Duration < gestureConfig.SwipeMaxDurationMs)
             {
                 gestureState.GestureCouldBeTap = false;
-                SwipeGestureEvent swipeEvent{ static_cast<float>(Dx / Duration),
-                                              static_cast<float>(Dy / Duration),
-                                              pointerEvent.X,
-                                              pointerEvent.Y,
-                                              gestureState.MaxSimultaneousTouches };
-                gestureEvents.emplace_back(std::move(swipeEvent));
+                SwipeGestureEvent swipeEvent{ .VelocityX=static_cast<float>(Dx / Duration),
+                                              .VelocityY=static_cast<float>(Dy / Duration),
+                                              .X=pointer_event.X,
+                                              .Y=pointer_event.Y,
+                                              .FingerCount=gestureState.MaxSimultaneousTouches };
+                gestureEvents.emplace_back(swipeEvent);
             }
         }
 
@@ -214,11 +215,11 @@ void InputManager::processPointerReleaseOrCancelEvent(const double eventTime,
 
     if (activeTouchPositions.empty())
     {
-        const double GestureDuration = eventTime - gestureState.GestureStartTime;
-        if (gestureState.GestureCouldBeTap && pointerEvent.State == PointerState::Released &&
-            GestureDuration < gestureConfig.TapMaxDurationMs)
+        const double gestureDuration = event_time - gestureState.GestureStartTime;
+        if (gestureState.GestureCouldBeTap && pointer_event.State == PointerState::Released &&
+            gestureDuration < gestureConfig.TapMaxDurationMs)
         {
-            gestureEvents.emplace_back(evaluateTapGestureEvent(pointerEvent.X, pointerEvent.Y, eventTime));
+            gestureEvents.emplace_back(evaluateTapGestureEvent(pointer_event.X, pointer_event.Y, event_time));
         }
 
         gestureState.MaxSimultaneousTouches = 0;
@@ -226,9 +227,9 @@ void InputManager::processPointerReleaseOrCancelEvent(const double eventTime,
     }
 }
 
-void InputManager::processPointerMoveEvent(const double eventTime, const PointerEvent& pointerEvent)
+void InputManager::processPointerMoveEvent(const double event_time, const PointerEvent& pointer_event)
 {
-    auto prevIter = activeTouchPositions.find(pointerEvent.ID);
+    auto prevIter = activeTouchPositions.find(pointer_event.ID);
     if (prevIter == activeTouchPositions.end())
     {
         return;
@@ -236,8 +237,8 @@ void InputManager::processPointerMoveEvent(const double eventTime, const Pointer
 
     // mutable as we update the last known position of touch point before returning
     TouchState& prevTouchState = prevIter->second;
-    const float totalDx = pointerEvent.X - prevTouchState.StartX;
-    const float totalDy = pointerEvent.Y - prevTouchState.StartY;
+    const float totalDx = pointer_event.X - prevTouchState.StartX;
+    const float totalDy = pointer_event.Y - prevTouchState.StartY;
 
     // if the total distance moved exceeds the tap threshold, we can no longer consider this a tap gesture
     if (std::hypot(totalDx, totalDy) > gestureConfig.TapMaxDistancePx)
@@ -247,15 +248,15 @@ void InputManager::processPointerMoveEvent(const double eventTime, const Pointer
 
     if (activeTouchPositions.size() == 1)
     {
-        PanGestureEvent panEvent{ pointerEvent.X - prevTouchState.X, pointerEvent.Y - prevTouchState.Y };
-        gestureEvents.emplace_back(std::move(panEvent));
+        PanGestureEvent panEvent{ .DeltaX=pointer_event.X - prevTouchState.X, .DeltaY=(pointer_event.Y - prevTouchState.Y) };
+        gestureEvents.emplace_back(panEvent);
     }
     else if (activeTouchPositions.size() == 2)
     {
         // find the other touch point, so we can calculate the pinch gesture
         auto touchBeginIter = activeTouchPositions.begin();
         // if the first touch in the map is the one that moved, get the other one
-        if (touchBeginIter->first == pointerEvent.ID)
+        if (touchBeginIter->first == pointer_event.ID)
         {
             ++touchBeginIter;
         }
@@ -265,14 +266,14 @@ void InputManager::processPointerMoveEvent(const double eventTime, const Pointer
         const float prevDeltaX = prevTouchState.X - otherTouchState.X;
         const float prevDeltaY = prevTouchState.Y - otherTouchState.Y;
         const float prevDist = std::hypot(prevDeltaX, prevDeltaY);
-        const float currDeltaX = pointerEvent.X - otherTouchState.X;
-        const float currDeltaY = pointerEvent.Y - otherTouchState.Y;
+        const float currDeltaX = pointer_event.X - otherTouchState.X;
+        const float currDeltaY = pointer_event.Y - otherTouchState.Y;
         const float currDist = std::hypot(currDeltaX, currDeltaY);
 
         const float scale = prevDist > k_PinchGestureEpsilon ? currDist / prevDist : 1.0f;
-        const float centerX = (pointerEvent.X + otherTouchState.X) * 0.5f;
-        const float centerY = (pointerEvent.Y + otherTouchState.Y) * 0.5f;
-        gestureEvents.emplace_back(PinchGestureEvent{ scale, centerX, centerY });
+        const float centerX = (pointer_event.X + otherTouchState.X) * 0.5f;
+        const float centerY = (pointer_event.Y + otherTouchState.Y) * 0.5f;
+        gestureEvents.emplace_back(PinchGestureEvent{ .Scale=scale, .CenterX=centerX, .CenterY=centerY });
 
         // now evaluate for a rotation gesture
         const float prevAngle = std::atan2(prevDeltaX, prevDeltaY);
@@ -282,26 +283,26 @@ void InputManager::processPointerMoveEvent(const double eventTime, const Pointer
         const float wrappedAngleDelta =
             std::fmod(angleDelta + std::numbers::pi_v<float>, 2.0f * std::numbers::pi_v<float>) -
             std::numbers::pi_v<float>;
-        gestureEvents.emplace_back(RotationGestureEvent{ wrappedAngleDelta, centerX, centerY });
+        gestureEvents.emplace_back(RotationGestureEvent{ .AngleDelta=wrappedAngleDelta, .CenterX=centerX, .CenterY=centerY });
         // (yells internally: i wish this was implemented as a coroutine instead of fsm!)
     }
 
     // update the last known position of this touch point
-    prevTouchState.X = pointerEvent.X;
-    prevTouchState.Y = pointerEvent.Y;
+    prevTouchState.X = pointer_event.X;
+    prevTouchState.Y = pointer_event.Y;
 }
 
-TapGestureEvent InputManager::evaluateTapGestureEvent(const float posX,
-                                                      const float posY,
-                                                      const double eventTime) noexcept
+TapGestureEvent InputManager::evaluateTapGestureEvent(const float pos_x,
+                                                      const float pos_y,
+                                                      const double event_time) noexcept
 {
     const bool posLastTapTime = gestureState.LastTapTime > 0.0;
-    const double timeSinceLastTap = eventTime - gestureState.LastTapTime;
+    const double timeSinceLastTap = event_time - gestureState.LastTapTime;
     const bool withinDoubleTapWindow = timeSinceLastTap < gestureConfig.DoubleTapWindowMs;
-    const uint32_t TapCount = (posLastTapTime && withinDoubleTapWindow) ? 2u : 1u;
-    const double newLastTapTime = (TapCount == 2u) ? 0.0 : eventTime;
+    const uint32_t tapCount = (posLastTapTime && withinDoubleTapWindow) ? 2u : 1u;
+    const double newLastTapTime = (tapCount == 2u) ? 0.0 : event_time;
     gestureState.LastTapTime = newLastTapTime;
-    return std::move(TapGestureEvent{ posX, posY, gestureState.MaxSimultaneousTouches, TapCount });
+    return TapGestureEvent{ .X=pos_x, .Y=pos_y, .FingerCount=gestureState.MaxSimultaneousTouches, .TapCount=tapCount };
 }
 
 void InputManager::evaluateGestures()
@@ -310,44 +311,44 @@ void InputManager::evaluateGestures()
     incomingEvents.clear();
     gestureEvents.clear();
 
-    for (const ReceivedEvent& Ev : coalescedEventsForFrame)
+    for (const ReceivedEvent& event : coalescedEventsForFrame)
     {
-        if (const CursorPositionEvent* Cur = std::get_if<CursorPositionEvent>(&Ev.EventData))
+        if (const CursorPositionEvent* currCursorEvent = std::get_if<CursorPositionEvent>(&event.EventData))
         {
-            processCursorPositionEvent(*Cur);
+            processCursorPositionEvent(*currCursorEvent);
             continue;
         }
 
-        const auto* Ptr = std::get_if<PointerEvent>(&Ev.EventData);
-        if (!Ptr)
+        const PointerEvent* pointerEvent = std::get_if<PointerEvent>(&event.EventData);
+        if (!pointerEvent)
         {
             continue;
         }
 
-        if (Ptr->Type == PointerType::Mouse)
+        if (pointerEvent->Type == PointerType::Mouse)
         {
-            setMouseDragging(Ptr->State);
+            setMouseDragging(pointerEvent->State);
             continue;
         }
 
         // logic from here on out is only used if the pointer type is a touch event
-        if (Ptr->Type != PointerType::Touch)
+        if (pointerEvent->Type != PointerType::Touch)
         {
             continue;
         }
 
-        switch (Ptr->State)
+        switch (pointerEvent->State)
         {
         case PointerState::Pressed:
-            processPointerPressEvent(Ev.Time, *Ptr);
+            processPointerPressEvent(event.Time, *pointerEvent);
             break;
         case PointerState::Released:
             [[fallthrough]];
         case PointerState::Cancelled:
-            processPointerReleaseOrCancelEvent(Ev.Time, *Ptr);
+            processPointerReleaseOrCancelEvent(event.Time, *pointerEvent);
             break;
         case PointerState::Moved:
-            processPointerMoveEvent(Ev.Time, *Ptr);
+            processPointerMoveEvent(event.Time, *pointerEvent);
             break;
         default:
             break;
@@ -361,7 +362,7 @@ void InputManager::evaluateGestures()
 namespace
 {
 #define GLFW_INCLUDE_NONE
-#include "glfw/glfw3.h"
+#include "GLFW/glfw3.h"
 using namespace velox;
 
 void CursorPositionCallback(GLFWwindow* window, double xpos, double ypos)

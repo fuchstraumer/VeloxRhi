@@ -96,8 +96,8 @@ public:
 private:
 
     ContextCreateInfo createInfo;
-    BootstrapPhase phase{ BootstrapPhase::Invalid };
-    std::unique_ptr<Scheduler> scheduler{ nullptr };
+    BootstrapPhase phase;
+    std::unique_ptr<Scheduler> scheduler;
 
     Result<wgpu::Instance> requestInstance();
     Result<GLFWwindow*> createNativeWindow();
@@ -115,7 +115,7 @@ private:
     DeviceFuture deviceFuture;
     wgpu::Device device;
     wgpu::Queue queue;
-    GLFWwindow* nativeWindow{ nullptr };
+    GLFWwindow* nativeWindow;
 
     wgpu::Surface surface;
     // we store the surface config to make reconfiguring not need the whole create info

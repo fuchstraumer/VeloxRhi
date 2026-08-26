@@ -1,10 +1,9 @@
 #include "core/Context.hpp"
-#include "async/AsyncTasks.hpp"
 #include "async/Scheduler.hpp"
 #include <algorithm>
+#include <array>
 #include <magic_enum/magic_enum.hpp>
 #include <print>
-#include <stdexcept>
 #include <webgpu/webgpu_glfw.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -17,15 +16,15 @@
 // :(
 std::string GetSystemDirectory()
 {
-    char buffer[MAX_PATH];
-    UINT result = GetSystemDirectoryA(buffer, MAX_PATH);
+    std::array<char, MAX_PATH> buffer{};
+    UINT result = GetSystemDirectoryA(buffer.data(), static_cast<UINT>(buffer.size()));
     if (result == 0 || result > MAX_PATH)
     {
         std::println(stderr, "Failed to get system directory: {}", GetLastError());
         return std::string{};
     }
     // path has to end with //, as dawn won't append it automatically lol
-    std::string strResult(buffer);
+    std::string strResult(buffer.data());
     if (strResult.back() != '\\')
     {
         strResult += '\\';
@@ -68,15 +67,13 @@ void LogDeviceLost([[maybe_unused]] const wgpu::Device&,
 namespace velox
 {
 
-Context::Context(ContextCreateInfo _createInfo)
-    : createInfo{ std::forward<ContextCreateInfo>(_createInfo) },
-      phase{ BootstrapPhase::Invalid },
-      scheduler{ std::make_unique<Scheduler>() }
+Context::Context(ContextCreateInfo create_info)
+    : createInfo{ std::forward<ContextCreateInfo>(create_info) },
+      scheduler{ std::make_unique<Scheduler>() },
+      instance{ ValidOrExit(requestInstance()) },
+      nativeWindow{ ValidOrExit(createNativeWindow()) },
+      phase{ BootstrapPhase::InstanceCreated }
 {
-    // only these two objects aren't dependent on async work
-    instance = ValidOrExit(requestInstance());
-    nativeWindow = ValidOrExit(createNativeWindow());
-    phase = BootstrapPhase::InstanceCreated;
 }
 
 Context::~Context()
@@ -231,11 +228,11 @@ Result<wgpu::Instance> Context::requestInstance()
     // as mentioned above, we want to make sure Dawn can find vulkan-1.dll on windows
     // (only when we're compiling for Native on Win32, of course!)
     std::string sys32Path = GetSystemDirectory();
-    const char* searchPaths[] = { sys32Path.c_str() };
+    std::array<const char*, 1> searchPaths{ sys32Path.c_str() };
 
     dawn::native::DawnInstanceDescriptor dawnDescriptor{};
     dawnDescriptor.additionalRuntimeSearchPathsCount = std::size(searchPaths);
-    dawnDescriptor.additionalRuntimeSearchPaths = searchPaths;
+    dawnDescriptor.additionalRuntimeSearchPaths = searchPaths.data();
     instanceDesc.nextInChain = &dawnDescriptor;
 #else
     instanceDesc.nextInChain = nullptr;
@@ -259,8 +256,8 @@ Result<GLFWwindow*> Context::createNativeWindow()
     // works like Vulkan - no context, just platform window
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    GLFWwindow* window = glfwCreateWindow(createInfo.InitialWidth,
-                                          createInfo.InitialHeight,
+    GLFWwindow* window = glfwCreateWindow(static_cast<int>(createInfo.InitialWidth),
+                                          static_cast<int>(createInfo.InitialHeight),
                                           createInfo.ApplicationName.data(),
                                           nullptr,
                                           nullptr);
@@ -341,7 +338,7 @@ Result<Context::BootstrapPhase> Context::bootstrapDevice()
 {
     if (!deviceFuture && !device)
     {
-        deviceFuture = RequestDevice(adapter, std::move(getDeviceDescriptor()), scheduler.get());
+        deviceFuture = RequestDevice(adapter, getDeviceDescriptor(), scheduler.get());
     }
 
     if (auto deviceResult = deviceFuture.TryGet())
@@ -390,7 +387,7 @@ void Context::configureSurface()
     wgpu::SurfaceCapabilities capabilities{};
     surface.GetCapabilities(adapter, &capabilities);
 
-    auto format_match = [this](wgpu::TextureFormat format)
+    auto formatMatch = [this](wgpu::TextureFormat format)
     {
         return format == createInfo.PreferredSurfaceFormat;
     };
@@ -403,10 +400,10 @@ void Context::configureSurface()
     }
     std::println(stderr, "[velox][context] Surface supported formats:{}", supportedFormats);
 
-    auto format_iter =
-        std::find_if(capabilities.formats, capabilities.formats + capabilities.formatCount, format_match);
+    auto formatIter =
+        std::find_if(capabilities.formats, capabilities.formats + capabilities.formatCount, formatMatch);
     wgpu::TextureFormat surfaceFormat{};
-    if (format_iter != capabilities.formats + capabilities.formatCount)
+    if (formatIter != capabilities.formats + capabilities.formatCount)
     {
         surfaceFormat = *format_iter;
         std::println(stderr,
