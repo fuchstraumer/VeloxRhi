@@ -76,13 +76,6 @@ set(MAGIC_ENUM_OPT_BUILD_TESTS OFF)
 set(MAGIC_ENUM_OPT_INSTALL OFF)
 add_subdirectory(third_party/magic_enum)
 
-# Add the offline shader compiler, a tool for compiling shaders to baked-in WGSL source code for
-# WebGPU to consume and bind at runtime. This has to be run before emscripten builds ship or are
-# tested.
-if(NOT EMSCRIPTEN)
-    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/tools/shader_cooker")
-endif()
-
 # rope together source files for imgui
 set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp
