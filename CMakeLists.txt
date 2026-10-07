@@ -17,10 +17,6 @@ include(cmake/ConfigureDawn.cmake)
 include(cmake/ConfigureBuildFlags.cmake)
 include(cmake/ConfigureMiscThirdParty.cmake)
 
-if (NOT EMSCRIPTEN)
-    include(cmake/ConfigureSlang.cmake)
-endif()
-
 # need this to generate various support files for the ocean fft
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -63,9 +59,6 @@ if (NOT EMSCRIPTEN)
     set(GLFW_LIBRARY_TYPE "STATIC" CACHE STRING "Library type override for GLFW (SHARED, STATIC, OBJECT, or empty to follow BUILD_SHARED_LIBS)")
     add_subdirectory(third_party/glfw)
     set_target_properties(glfw PROPERTIES FOLDER "third_party")
-
-    add_subdirectory(third_party/slang EXCLUDE_FROM_ALL)
-    organize_slang_targets()
 
 endif()
 
@@ -140,14 +133,6 @@ set(VeloxRhi_GraphSources
     "${CMAKE_CURRENT_SOURCE_DIR}/include/graph/SubpassBuilder.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/graph/ResourceFlagConversions.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/graph/SubpassDesc.hpp")
-
-# The vocabulary the shader cooker writes and the rendergraph reads. The cooker compiles these same
-# files, so the offline tool and the runtime cannot disagree about what a binding is.
-set(VeloxRhi_ShaderSources
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/shader/ShaderLibraryTypes.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/shader/ShaderLibraryTypes.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/shader/ShaderManifest.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/shader/ShaderManifest.cpp")
 
 set(VeloxRhi_UtilitySources
     "${CMAKE_CURRENT_SOURCE_DIR}/include/utility/EnumClassUtils.hpp"

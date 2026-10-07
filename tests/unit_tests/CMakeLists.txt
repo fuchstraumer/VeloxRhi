@@ -36,13 +36,3 @@ endfunction()
 
 add_velox_unit_test(MathTests MathTests.cpp)
 
-# The cooker's size-expression parser is pure -- a string and a symbol table in, an integer out -- so
-# it is tested by compiling those two sources directly rather than by linking the host tool, which
-# would drag in Slang. That also keeps the test running under the Emscripten preset.
-set(VELOX_SHADER_COOKER_DIR "${CMAKE_SOURCE_DIR}/tools/shader_cooker")
-add_velox_unit_test(SizeExpressionTests
-    SizeExpressionTests.cpp
-    "${VELOX_SHADER_COOKER_DIR}/src/SizeExpression.cpp"
-    "${VELOX_SHADER_COOKER_DIR}/src/CookerErrors.cpp")
-target_include_directories(SizeExpressionTests PRIVATE "${VELOX_SHADER_COOKER_DIR}/include")
-target_link_libraries(SizeExpressionTests PRIVATE magic_enum::magic_enum)
