@@ -10,6 +10,11 @@ set(DAWN_ENABLE_D3D11 OFF)
 if (NOT EMSCRIPTEN)
     set(DAWN_ENABLE_D3D12 ON)
     set(DAWN_USE_BUILT_DXC ON)
+    # DXC only recognizes MSVC/MinGW. With clang.exe it falls back to running `sh config.guess`, which
+    # fails when sh is not on PATH and would report a mingw triple anyway.
+    if(WIN32 AND NOT MSVC)
+        set(LLVM_INFERRED_HOST_TRIPLE "x86_64-pc-win32")
+    endif()
 endif()
 # Vulkan currently broken because of the Nvidia fp16 bugs, disabling
 set(DAWN_ENABLE_VULKAN OFF)
@@ -31,4 +36,3 @@ set(TINT_BUILD_SPV_WRITER OFF)
 set(TINT_BUILD_SPV_READER OFF)
 set(TINT_ENABLE_IR_DUMPING OFF)
 set(TINT_BUILD_IR_BINARY OFF)
-

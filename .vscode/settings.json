@@ -7,5 +7,21 @@
         "third_party/slang/**": true,
         "third_party/dawn/third_party/**": true,
         "third_party/glfw/**": true
-    }
+    },
+    "clangd.arguments": [
+        "--query-driver=C:/Program Files/LLVM/bin/clang-cl.exe,C:/Program Files/LLVM/bin/clang++.exe,C:/Program Files/LLVM/bin/clang.exe",
+        "--compile-commands-dir=${workspaceFolder}/build/ninja-clang-cl",
+        "--background-index",
+        "--header-insertion=never",
+        "--pch-storage=memory",
+        "--limit-results=50",
+        "--completion-style=detailed",
+        "--clang-tidy",
+        "--enable-config",
+        "--fallback-style=none",
+        "-j=6"
+    ],
+    "clangd.onConfigChanged": "restart",
+    "clangd.checkUpdates": true,
+    "editor.semanticHighlighting.enabled": true
 }

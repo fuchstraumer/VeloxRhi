@@ -54,8 +54,8 @@ cmake --preset ninja-msvc
 cmake --build --preset windows-ninja-msvc-debug
 cmake --build --preset windows-ninja-msvc-relwithdebinfo
 
-# Native, Clang
-cmake --preset ninja-clang
+# Native, Clang-CL
+cmake --preset ninja-clang-cl
 cmake --build --preset windows-ninja-clang-debug
 cmake --build --preset windows-ninja-clang-relwithdebinfo
 

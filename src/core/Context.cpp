@@ -405,7 +405,7 @@ void Context::configureSurface()
     wgpu::TextureFormat surfaceFormat{};
     if (formatIter != capabilities.formats + capabilities.formatCount)
     {
-        surfaceFormat = *format_iter;
+        surfaceFormat = *formatIter;
         std::println(stderr,
                      "[velox][context] Using preferred surface format {}",
                      magic_enum::enum_name(surfaceFormat));

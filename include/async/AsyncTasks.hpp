@@ -143,7 +143,7 @@ struct MapSession
         static_assert(std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>,
                       "T must be standard layout to interpret mapped data as span of T");
         const size_t numElements = size / sizeof(T);
-#if !defined(__EMSCRIPTEN__) && defined(_MSC_VER)
+#if !defined(__EMSCRIPTEN__) && defined(_MSC_VER) && !defined(__clang__)
         T* typeArray = std::start_lifetime_as_array<T>(mappedPtr, numElements);
 #else
         T* typeArray = reinterpret_cast<T*>(mappedPtr);
@@ -160,7 +160,7 @@ struct MapSession
             std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>,
             "T must be standard layout and trivially copyable to interpret mapped data as span of T");
         const size_t numElements = size / sizeof(T);
-#if !defined(__EMSCRIPTEN__) && defined(_MSC_VER)
+#if !defined(__EMSCRIPTEN__) && defined(_MSC_VER) && !defined(__clang__)
         const T* typeArray = std::start_lifetime_as_array<T>(mappedPtr, numElements);
 #else
         const T* typeArray = reinterpret_cast<const T*>(mappedPtr);

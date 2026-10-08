@@ -22,7 +22,7 @@ internal float MitsuyasuNormalizationFactor(in float s)
 
 // Hasselman normalization Q(s) -- fit in ln(s)/ln(Q) space
 // valid range: s in [0.0000, 14490.0000]
-// max relative error: low segment 1.64e-03, high segment 1.35e-10
+// max relative error: low segment 1.64e-03, high segment 1.46e-10
 internal float HasselmanNormalizationFactor(in float s)
 {
     static const float HasselmanSplitS = 14433.176507f;
@@ -33,7 +33,7 @@ internal float HasselmanNormalizationFactor(in float s)
     }
     else
     {
-        return exp(mad(mad(mad(mad(1.61516696f, lnS, -61.8895566f), lnS, 889.300602f), lnS, -5678.83233f), lnS, 13599.9351f));
+        return exp(mad(mad(mad(mad(1.61484988f, lnS, -61.8774073f), lnS, 889.126034f), lnS, -5677.71754f), lnS, 13597.2655f));
     }
 }
 

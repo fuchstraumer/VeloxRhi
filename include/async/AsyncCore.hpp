@@ -93,10 +93,11 @@ struct SchedulerDispatchedAwaitable
         // the crucial part, and most of why this trick works: we know the derived type here,
         // we can directly access the scheduler member. we constrain the promise type to require
         // this, too!
-        promise.Scheduler = static_cast<Derived*>(this)->scheduler;
-        if (promise.Scheduler)
+        auto* awaitableScheduler = static_cast<Derived*>(this)->scheduler;
+        promise.Scheduler = awaitableScheduler;
+        if (awaitableScheduler)
         {
-            promise.SlotHandle = promise.Scheduler->Enqueue(coroHandle);
+            promise.SlotHandle = awaitableScheduler->Enqueue(coroHandle);
         }
         // now each derived awaitable will dispatch to... dispatch function. this is where
         // we'll put actual logic, in source files ideally, since it can pull in other headers
